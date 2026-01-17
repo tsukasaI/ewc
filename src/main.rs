@@ -4,7 +4,9 @@ use std::path::Path;
 use std::process;
 
 use ewc::cli::Args;
-use ewc::counter::{count_directory, count_directory_detailed, count_file, Count};
+use ewc::counter::{
+    count_directory, count_directory_detailed, count_file, count_from_reader, Count,
+};
 use ewc::output::{
     format_compact_output, format_compact_total, format_json_multiple, format_json_single,
     format_output, format_separator, format_total_output, format_verbose_output, JsonFileResult,
@@ -35,15 +37,41 @@ fn main() {
     let args = Args::parse();
 
     if args.files.is_empty() {
-        eprintln!("ewc: No files specified");
-        process::exit(1);
-    }
-
-    // JSON mode requires buffering results
-    if args.json {
+        run_stdin_mode(&args);
+    } else if args.json {
         run_json_mode(&args);
     } else {
         run_normal_mode(&args);
+    }
+}
+
+fn run_stdin_mode(args: &Args) {
+    let count = match count_from_reader(io::stdin().lock()) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("{WARNING_ICON}  <stdin>: {e}");
+            process::exit(1);
+        }
+    };
+
+    if args.json {
+        let result = JsonFileResult {
+            name: "<stdin>".to_string(),
+            count,
+            is_directory: false,
+            file_count: None,
+        };
+        println!("{}", format_json_single(&result));
+    } else if args.compact {
+        println!(
+            "{}",
+            format_compact_output("<stdin>", &count, OutputKind::File, args)
+        );
+    } else {
+        println!(
+            "{}",
+            format_output("<stdin>", &count, OutputKind::File, args)
+        );
     }
 }
 

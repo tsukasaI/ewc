@@ -402,3 +402,124 @@ fn json_output_is_valid() {
     assert!(trimmed.starts_with('{'));
     assert!(trimmed.ends_with('}'));
 }
+
+// Phase 5: stdin support tests
+fn run_ewc_with_stdin(args: &[&str], stdin_content: &str) -> CommandResult {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let mut child = Command::new("./target/debug/ewc")
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn ewc");
+
+    // Write to stdin and drop handle to send EOF
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(stdin_content.as_bytes())
+        .unwrap();
+
+    let output = child.wait_with_output().unwrap();
+    CommandResult {
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        success: output.status.success(),
+    }
+}
+
+#[test]
+fn stdin_input_basic() {
+    let result = run_ewc_with_stdin(&[], "hello world\n");
+
+    assert!(result.success);
+    assert!(result.stdout.contains("<stdin>"));
+    assert!(result.stdout.contains("Lines:"));
+}
+
+#[test]
+fn stdin_input_no_color() {
+    let result = run_ewc_with_stdin(&["--no-color"], "hello\n");
+
+    assert!(result.success);
+    assert!(result.stdout.contains("<stdin>"));
+    assert!(!result.stdout.contains("📄"));
+}
+
+#[test]
+fn stdin_input_json() {
+    let result = run_ewc_with_stdin(&["--json"], "hello world\n");
+
+    assert!(result.success);
+    assert!(result.stdout.contains("\"file\":\"<stdin>\""));
+    assert!(result.stdout.contains("\"lines\":1"));
+    assert!(result.stdout.contains("\"words\":2"));
+}
+
+#[test]
+fn stdin_input_compact() {
+    let result = run_ewc_with_stdin(&["-C"], "hello world\n");
+
+    assert!(result.success);
+    assert!(result.stdout.contains("<stdin>:"));
+    assert_eq!(result.stdout.trim().lines().count(), 1);
+}
+
+#[test]
+fn stdin_input_lines_only() {
+    let result = run_ewc_with_stdin(&["-l"], "line1\nline2\n");
+
+    assert!(result.success);
+    assert!(result.stdout.contains("Lines:"));
+    assert!(!result.stdout.contains("Words:"));
+    assert!(!result.stdout.contains("Bytes:"));
+}
+
+// Phase 5: Enhanced error handling tests
+#[test]
+fn error_message_file_not_found() {
+    let result = run_ewc(&["definitely_not_a_real_file.txt"]);
+
+    assert!(!result.success);
+    assert!(result.stderr.contains("⚠️"));
+    assert!(result.stderr.contains("definitely_not_a_real_file.txt"));
+}
+
+#[test]
+fn single_file_not_found_exits_with_error() {
+    let result = run_ewc(&["nonexistent_file.txt"]);
+
+    assert!(!result.success);
+    assert!(result.stderr.contains("⚠️"));
+    assert!(!result.stdout.contains("Lines:"));
+}
+
+#[test]
+fn json_mode_continues_after_error() {
+    let file1 = create_test_file("hello\n");
+    let file2 = create_test_file("world\n");
+    let result = run_ewc(&[
+        "--json",
+        file1.path().to_str().unwrap(),
+        "nonexistent.txt",
+        file2.path().to_str().unwrap(),
+    ]);
+
+    assert!(!result.success);
+    assert!(result.stdout.contains("\"files\""));
+    assert!(result.stdout.contains("\"total\""));
+}
+
+#[test]
+fn directory_and_nonexistent_file() {
+    let dir = create_test_dir();
+    let result = run_ewc(&[dir.path().to_str().unwrap(), "nonexistent.txt"]);
+
+    assert!(!result.success);
+    assert!(result.stderr.contains("nonexistent.txt"));
+    assert!(result.stdout.contains("📁"));
+}

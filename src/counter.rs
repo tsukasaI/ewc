@@ -1,5 +1,5 @@
 use std::fs;
-use std::io;
+use std::io::{self, Read};
 use std::ops::{Add, AddAssign};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
@@ -48,6 +48,12 @@ impl AddAssign for Count {
 
 pub fn count_file(path: &Path) -> io::Result<Count> {
     let content = fs::read_to_string(path)?;
+    Ok(Count::from_content(&content))
+}
+
+pub fn count_from_reader<R: Read>(mut reader: R) -> io::Result<Count> {
+    let mut content = String::new();
+    reader.read_to_string(&mut content)?;
     Ok(Count::from_content(&content))
 }
 
@@ -385,5 +391,78 @@ mod tests {
         assert!(entries[0].path.to_string_lossy().contains("a_file"));
         assert!(entries[1].path.to_string_lossy().contains("m_file"));
         assert!(entries[2].path.to_string_lossy().contains("z_file"));
+    }
+
+    // Phase 5: stdin support tests
+    #[test]
+    fn count_from_reader_simple() {
+        use std::io::Cursor;
+        let reader = Cursor::new("hello world\n");
+        let count = count_from_reader(reader).unwrap();
+        assert_eq!(count.lines, 1);
+        assert_eq!(count.words, 2);
+        assert_eq!(count.bytes, 12);
+    }
+
+    #[test]
+    fn count_from_reader_empty() {
+        use std::io::Cursor;
+        let reader = Cursor::new("");
+        let count = count_from_reader(reader).unwrap();
+        assert_eq!(count.lines, 0);
+        assert_eq!(count.words, 0);
+        assert_eq!(count.bytes, 0);
+    }
+
+    #[test]
+    fn count_from_reader_multiline() {
+        use std::io::Cursor;
+        // "line one\n" (9) + "line two\n" (9) + "line three\n" (11) = 29 bytes
+        let reader = Cursor::new("line one\nline two\nline three\n");
+        let count = count_from_reader(reader).unwrap();
+        assert_eq!(count.lines, 3);
+        assert_eq!(count.words, 6);
+        assert_eq!(count.bytes, 29);
+    }
+
+    #[test]
+    fn count_file_multiline() {
+        use std::io::Write;
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(file, "hello world").unwrap();
+        writeln!(file, "foo bar baz").unwrap();
+        writeln!(file, "line three").unwrap();
+
+        let count = count_file(file.path()).unwrap();
+
+        assert_eq!(count.lines, 3);
+        // "hello world" (2) + "foo bar baz" (3) + "line three" (2) = 7 words
+        assert_eq!(count.words, 7);
+        // "hello world\n" (12) + "foo bar baz\n" (12) + "line three\n" (11) = 35 bytes
+        assert_eq!(count.bytes, 35);
+    }
+
+    #[test]
+    fn count_file_no_trailing_newline() {
+        use std::io::Write;
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        write!(file, "hello world").unwrap(); // No newline at end
+
+        let count = count_file(file.path()).unwrap();
+
+        assert_eq!(count.lines, 1);
+        assert_eq!(count.words, 2);
+        assert_eq!(count.bytes, 11);
+    }
+
+    #[test]
+    fn count_file_empty() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+
+        let count = count_file(file.path()).unwrap();
+
+        assert_eq!(count.lines, 0);
+        assert_eq!(count.words, 0);
+        assert_eq!(count.bytes, 0);
     }
 }
