@@ -46,7 +46,10 @@ fn benchmark_comparison() {
     let ewc_time = bench_ewc(small.path().to_str().unwrap(), runs);
     println!("  wc:  {:?} ({:.2?} per run)", wc_time, wc_time / runs);
     println!("  ewc: {:?} ({:.2?} per run)", ewc_time, ewc_time / runs);
-    println!("  ratio: {:.2}x", ewc_time.as_secs_f64() / wc_time.as_secs_f64());
+    println!(
+        "  ratio: {:.2}x",
+        ewc_time.as_secs_f64() / wc_time.as_secs_f64()
+    );
 
     // Medium file (100K lines)
     let medium = create_test_file(100_000);
@@ -57,7 +60,10 @@ fn benchmark_comparison() {
     let ewc_time = bench_ewc(medium.path().to_str().unwrap(), runs);
     println!("  wc:  {:?} ({:.2?} per run)", wc_time, wc_time / runs);
     println!("  ewc: {:?} ({:.2?} per run)", ewc_time, ewc_time / runs);
-    println!("  ratio: {:.2}x", ewc_time.as_secs_f64() / wc_time.as_secs_f64());
+    println!(
+        "  ratio: {:.2}x",
+        ewc_time.as_secs_f64() / wc_time.as_secs_f64()
+    );
 
     // Large file (500K lines)
     let large = create_test_file(500_000);
@@ -68,7 +74,10 @@ fn benchmark_comparison() {
     let ewc_time = bench_ewc(large.path().to_str().unwrap(), runs);
     println!("  wc:  {:?} ({:.2?} per run)", wc_time, wc_time / runs);
     println!("  ewc: {:?} ({:.2?} per run)", ewc_time, ewc_time / runs);
-    println!("  ratio: {:.2}x", ewc_time.as_secs_f64() / wc_time.as_secs_f64());
+    println!(
+        "  ratio: {:.2}x",
+        ewc_time.as_secs_f64() / wc_time.as_secs_f64()
+    );
 
     println!("\n(ratio < 1.0 means ewc is faster)");
 }

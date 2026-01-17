@@ -53,7 +53,11 @@ mod tests {
 
     #[test]
     fn format_file_output_all_counts() {
-        let count = Count { lines: 50, words: 200, bytes: 1500 };
+        let count = Count {
+            lines: 50,
+            words: 200,
+            bytes: 1500,
+        };
         let output = format_file_output("file.txt", &count, true, true, true);
         assert!(output.contains("file.txt"));
         assert!(output.contains("Lines:"));
@@ -66,7 +70,11 @@ mod tests {
 
     #[test]
     fn format_file_output_lines_only() {
-        let count = Count { lines: 50, words: 200, bytes: 1500 };
+        let count = Count {
+            lines: 50,
+            words: 200,
+            bytes: 1500,
+        };
         let output = format_file_output("file.txt", &count, true, false, false);
         assert!(output.contains("Lines:"));
         assert!(!output.contains("Words:"));
