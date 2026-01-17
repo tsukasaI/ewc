@@ -1,4 +1,10 @@
+use crate::cli::Args;
 use crate::counter::Count;
+
+pub enum OutputKind {
+    File,
+    Directory(usize),
+}
 
 pub fn format_number(n: usize) -> String {
     n.to_string()
@@ -10,33 +16,43 @@ pub fn format_number(n: usize) -> String {
         .join(",")
 }
 
-fn format_count_lines(
-    output: &mut Vec<String>,
-    count: &Count,
-    show_lines: bool,
-    show_words: bool,
-    show_bytes: bool,
-) {
-    if show_lines {
-        output.push(format!("   Lines: {:>10}", format_number(count.lines)));
+fn format_count_lines(count: &Count, args: &Args) -> Vec<String> {
+    let mut lines = Vec::new();
+    if args.show_lines() {
+        lines.push(format!("   Lines: {:>10}", format_number(count.lines)));
     }
-    if show_words {
-        output.push(format!("   Words: {:>10}", format_number(count.words)));
+    if args.show_words() {
+        lines.push(format!("   Words: {:>10}", format_number(count.words)));
     }
-    if show_bytes {
-        output.push(format!("   Bytes: {:>10}", format_number(count.bytes)));
+    if args.show_bytes() {
+        lines.push(format!("   Bytes: {:>10}", format_number(count.bytes)));
+    }
+    lines
+}
+
+fn pluralize_files(count: usize) -> &'static str {
+    if count == 1 {
+        "file"
+    } else {
+        "files"
     }
 }
 
-pub fn format_file_output(
-    filename: &str,
-    count: &Count,
-    show_lines: bool,
-    show_words: bool,
-    show_bytes: bool,
-) -> String {
-    let mut output = vec![format!("\u{1F4C4} {}", filename)];
-    format_count_lines(&mut output, count, show_lines, show_words, show_bytes);
+fn format_header(name: &str, kind: OutputKind) -> String {
+    match kind {
+        OutputKind::File => format!("\u{1F4C4} {name}"),
+        OutputKind::Directory(file_count) => {
+            format!(
+                "\u{1F4C1} {name} ({file_count} {})",
+                pluralize_files(file_count)
+            )
+        }
+    }
+}
+
+pub fn format_output(name: &str, count: &Count, kind: OutputKind, args: &Args) -> String {
+    let mut output = vec![format_header(name, kind)];
+    output.extend(format_count_lines(count, args));
     output.join("\n")
 }
 
@@ -44,22 +60,29 @@ pub fn format_separator() -> &'static str {
     "─────────────────────────"
 }
 
-pub fn format_total_output(
-    file_count: usize,
-    count: &Count,
-    show_lines: bool,
-    show_words: bool,
-    show_bytes: bool,
-) -> String {
-    let file_word = if file_count == 1 { "file" } else { "files" };
-    let mut output = vec![format!("\u{1F4C1} Total ({} {})", file_count, file_word)];
-    format_count_lines(&mut output, count, show_lines, show_words, show_bytes);
+pub fn format_total_output(file_count: usize, count: &Count, args: &Args) -> String {
+    let header = format!(
+        "\u{1F4C1} Total ({} {})",
+        file_count,
+        pluralize_files(file_count)
+    );
+    let mut output = vec![header];
+    output.extend(format_count_lines(count, args));
     output.join("\n")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn make_args(lines: bool, words: bool, bytes: bool) -> Args {
+        Args {
+            files: vec![],
+            lines,
+            words,
+            bytes,
+        }
+    }
 
     #[test]
     fn format_number_without_comma() {
@@ -83,7 +106,8 @@ mod tests {
             words: 200,
             bytes: 1500,
         };
-        let output = format_file_output("file.txt", &count, true, true, true);
+        let args = make_args(false, false, false);
+        let output = format_output("file.txt", &count, OutputKind::File, &args);
         assert!(output.contains("file.txt"));
         assert!(output.contains("Lines:"));
         assert!(output.contains("50"));
@@ -100,7 +124,8 @@ mod tests {
             words: 200,
             bytes: 1500,
         };
-        let output = format_file_output("file.txt", &count, true, false, false);
+        let args = make_args(true, false, false);
+        let output = format_output("file.txt", &count, OutputKind::File, &args);
         assert!(output.contains("Lines:"));
         assert!(!output.contains("Words:"));
         assert!(!output.contains("Bytes:"));
@@ -120,7 +145,8 @@ mod tests {
             words: 300,
             bytes: 2300,
         };
-        let output = format_total_output(2, &count, true, true, true);
+        let args = make_args(false, false, false);
+        let output = format_total_output(2, &count, &args);
         assert!(output.contains("Total (2 files)"));
         assert!(output.contains("Lines:"));
         assert!(output.contains("80"));
@@ -133,10 +159,11 @@ mod tests {
     #[test]
     fn format_total_pluralization() {
         let count = Count::default();
-        let output_single = format_total_output(1, &count, true, true, true);
+        let args = make_args(false, false, false);
+        let output_single = format_total_output(1, &count, &args);
         assert!(output_single.contains("1 file)"));
 
-        let output_plural = format_total_output(2, &count, true, true, true);
+        let output_plural = format_total_output(2, &count, &args);
         assert!(output_plural.contains("2 files)"));
     }
 
@@ -147,9 +174,40 @@ mod tests {
             words: 300,
             bytes: 2300,
         };
-        let output = format_total_output(2, &count, true, false, false);
+        let args = make_args(true, false, false);
+        let output = format_total_output(2, &count, &args);
         assert!(output.contains("Lines:"));
         assert!(!output.contains("Words:"));
         assert!(!output.contains("Bytes:"));
+    }
+
+    #[test]
+    fn format_directory_output_all_counts() {
+        let count = Count {
+            lines: 1234,
+            words: 5678,
+            bytes: 45000,
+        };
+        let args = make_args(false, false, false);
+        let output = format_output("src/", &count, OutputKind::Directory(5), &args);
+        assert!(output.contains("\u{1F4C1} src/ (5 files)"));
+        assert!(output.contains("Lines:"));
+        assert!(output.contains("1,234"));
+        assert!(output.contains("Words:"));
+        assert!(output.contains("5,678"));
+        assert!(output.contains("Bytes:"));
+        assert!(output.contains("45,000"));
+    }
+
+    #[test]
+    fn format_directory_output_single_file() {
+        let count = Count {
+            lines: 10,
+            words: 20,
+            bytes: 100,
+        };
+        let args = make_args(false, false, false);
+        let output = format_output("dir/", &count, OutputKind::Directory(1), &args);
+        assert!(output.contains("\u{1F4C1} dir/ (1 file)"));
     }
 }

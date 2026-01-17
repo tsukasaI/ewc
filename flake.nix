@@ -8,22 +8,35 @@
     let
       system = "aarch64-darwin";
       pkgs = nixpkgs.legacyPackages.${system};
+      rustToolchain = pkgs.rustPlatform;
     in {
       checks.${system}.pre-commit = git-hooks.lib.${system}.run {
         src = ./.;
         hooks = {
-          rustfmt.enable = true;
+          rustfmt = {
+            enable = true;
+            package = pkgs.rustfmt;
+          };
           clippy = {
             enable = true;
+            package = pkgs.clippy;
             settings.denyWarnings = true;
           };
-          cargo-check.enable = true;
+          cargo-check = {
+            enable = true;
+            package = pkgs.cargo;
+          };
         };
       };
 
       devShells.${system}.default = pkgs.mkShell {
         inherit (self.checks.${system}.pre-commit) shellHook;
-        buildInputs = self.checks.${system}.pre-commit.enabledPackages;
+        buildInputs = [
+          pkgs.cargo
+          pkgs.rustc
+          pkgs.rustfmt
+          pkgs.clippy
+        ] ++ self.checks.${system}.pre-commit.enabledPackages;
       };
     };
 }

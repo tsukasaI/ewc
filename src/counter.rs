@@ -2,6 +2,7 @@ use std::fs;
 use std::io;
 use std::ops::{Add, AddAssign};
 use std::path::Path;
+use walkdir::WalkDir;
 
 #[derive(Debug, Default, PartialEq)]
 pub struct Count {
@@ -43,6 +44,34 @@ impl AddAssign for Count {
 pub fn count_file(path: &Path) -> io::Result<Count> {
     let content = fs::read_to_string(path)?;
     Ok(Count::from_content(&content))
+}
+
+fn is_hidden(entry: &walkdir::DirEntry) -> bool {
+    entry
+        .file_name()
+        .to_str()
+        .is_some_and(|s| s.starts_with('.'))
+}
+
+pub fn count_directory(path: &Path) -> io::Result<(Count, usize)> {
+    let mut total = Count::default();
+    let mut file_count = 0;
+
+    // Don't filter root entry (depth 0), only filter hidden entries inside
+    let walker = WalkDir::new(path)
+        .into_iter()
+        .filter_entry(|e| e.depth() == 0 || !is_hidden(e));
+
+    for entry in walker.filter_map(|e| e.ok()) {
+        if entry.file_type().is_file() {
+            if let Ok(count) = count_file(entry.path()) {
+                total += count;
+                file_count += 1;
+            }
+        }
+    }
+
+    Ok((total, file_count))
 }
 
 #[cfg(test)]
@@ -140,5 +169,113 @@ mod tests {
         assert_eq!(total.lines, 15);
         assert_eq!(total.words, 75);
         assert_eq!(total.bytes, 300);
+    }
+
+    #[test]
+    fn count_directory_with_single_file() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.txt");
+        let mut file = std::fs::File::create(&file_path).unwrap();
+        writeln!(file, "hello world").unwrap();
+
+        let result = count_directory(dir.path());
+        assert!(result.is_ok());
+        let (count, file_count) = result.unwrap();
+        assert_eq!(file_count, 1);
+        assert_eq!(count.lines, 1);
+        assert_eq!(count.words, 2);
+    }
+
+    #[test]
+    fn count_directory_with_multiple_files() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+
+        let file1 = dir.path().join("file1.txt");
+        let mut f1 = std::fs::File::create(&file1).unwrap();
+        writeln!(f1, "hello").unwrap();
+
+        let file2 = dir.path().join("file2.txt");
+        let mut f2 = std::fs::File::create(&file2).unwrap();
+        writeln!(f2, "world").unwrap();
+
+        let result = count_directory(dir.path());
+        assert!(result.is_ok());
+        let (count, file_count) = result.unwrap();
+        assert_eq!(file_count, 2);
+        assert_eq!(count.lines, 2);
+        assert_eq!(count.words, 2);
+    }
+
+    #[test]
+    fn count_directory_recursive() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+
+        // Root file
+        let file1 = dir.path().join("root.txt");
+        let mut f1 = std::fs::File::create(&file1).unwrap();
+        writeln!(f1, "root").unwrap();
+
+        // Nested directory with file
+        let subdir = dir.path().join("subdir");
+        std::fs::create_dir(&subdir).unwrap();
+        let file2 = subdir.join("nested.txt");
+        let mut f2 = std::fs::File::create(&file2).unwrap();
+        writeln!(f2, "nested file").unwrap();
+
+        let result = count_directory(dir.path());
+        assert!(result.is_ok());
+        let (count, file_count) = result.unwrap();
+        assert_eq!(file_count, 2);
+        assert_eq!(count.lines, 2);
+        assert_eq!(count.words, 3); // "root" + "nested file"
+    }
+
+    #[test]
+    fn count_directory_excludes_hidden_files() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+
+        // Visible file
+        let file1 = dir.path().join("visible.txt");
+        let mut f1 = std::fs::File::create(&file1).unwrap();
+        writeln!(f1, "visible").unwrap();
+
+        // Hidden file (should be excluded)
+        let file2 = dir.path().join(".hidden");
+        let mut f2 = std::fs::File::create(&file2).unwrap();
+        writeln!(f2, "hidden").unwrap();
+
+        let result = count_directory(dir.path());
+        assert!(result.is_ok());
+        let (count, file_count) = result.unwrap();
+        assert_eq!(file_count, 1); // Only visible file
+        assert_eq!(count.words, 1); // Only "visible"
+    }
+
+    #[test]
+    fn count_directory_excludes_hidden_directories() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+
+        // Visible file
+        let file1 = dir.path().join("visible.txt");
+        let mut f1 = std::fs::File::create(&file1).unwrap();
+        writeln!(f1, "visible").unwrap();
+
+        // Hidden directory with file (should be excluded)
+        let hidden_dir = dir.path().join(".hidden_dir");
+        std::fs::create_dir(&hidden_dir).unwrap();
+        let file2 = hidden_dir.join("nested.txt");
+        let mut f2 = std::fs::File::create(&file2).unwrap();
+        writeln!(f2, "nested in hidden").unwrap();
+
+        let result = count_directory(dir.path());
+        assert!(result.is_ok());
+        let (count, file_count) = result.unwrap();
+        assert_eq!(file_count, 1); // Only visible file
+        assert_eq!(count.words, 1); // Only "visible"
     }
 }

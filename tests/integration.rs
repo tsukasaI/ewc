@@ -55,7 +55,10 @@ fn multiple_files_correct_aggregation() {
     assert!(success);
     assert!(stdout.contains("Total (2 files)"));
     // Total should be 3 lines
-    let total_section: String = stdout.lines().skip_while(|l| !l.contains("Total")).collect();
+    let total_section: String = stdout
+        .lines()
+        .skip_while(|l| !l.contains("Total"))
+        .collect();
     assert!(total_section.contains("3"));
 }
 
@@ -145,4 +148,48 @@ fn blank_lines_between_files() {
     assert!(success);
     // Should have blank line between file outputs
     assert!(stdout.contains("\n\n"));
+}
+
+fn create_test_dir() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("file1.txt"), "hello world\n").unwrap();
+    std::fs::write(dir.path().join("file2.txt"), "foo bar baz\n").unwrap();
+    dir
+}
+
+#[test]
+fn directory_shows_summary() {
+    let dir = create_test_dir();
+    let (stdout, _, success) = run_ewc(&[dir.path().to_str().unwrap()]);
+
+    assert!(success);
+    assert!(stdout.contains("📁"));
+    assert!(stdout.contains("(2 files)"));
+    assert!(stdout.contains("Lines:"));
+}
+
+#[test]
+fn directory_excludes_hidden_files() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("visible.txt"), "visible\n").unwrap();
+    std::fs::write(dir.path().join(".hidden"), "hidden\n").unwrap();
+
+    let (stdout, _, success) = run_ewc(&[dir.path().to_str().unwrap()]);
+
+    assert!(success);
+    assert!(stdout.contains("(1 file)"));
+}
+
+#[test]
+fn directory_with_nested_files() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("root.txt"), "root\n").unwrap();
+    let subdir = dir.path().join("subdir");
+    std::fs::create_dir(&subdir).unwrap();
+    std::fs::write(subdir.join("nested.txt"), "nested\n").unwrap();
+
+    let (stdout, _, success) = run_ewc(&[dir.path().to_str().unwrap()]);
+
+    assert!(success);
+    assert!(stdout.contains("(2 files)"));
 }

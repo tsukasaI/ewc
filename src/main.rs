@@ -1,10 +1,29 @@
 use clap::Parser;
+use std::io;
 use std::path::Path;
 use std::process;
 
 use ewc::cli::Args;
-use ewc::counter::{count_file, Count};
-use ewc::output::{format_file_output, format_separator, format_total_output};
+use ewc::counter::{count_directory, count_file, Count};
+use ewc::output::{format_output, format_separator, format_total_output, OutputKind};
+
+struct ProcessResult {
+    count: Count,
+    file_count: usize,
+}
+
+fn process_path(path: &Path) -> io::Result<ProcessResult> {
+    if path.is_dir() {
+        let (count, file_count) = count_directory(path)?;
+        Ok(ProcessResult { count, file_count })
+    } else {
+        let count = count_file(path)?;
+        Ok(ProcessResult {
+            count,
+            file_count: 1,
+        })
+    }
+}
 
 fn main() {
     let args = Args::parse();
@@ -16,26 +35,28 @@ fn main() {
 
     let mut has_error = false;
     let mut total_count = Count::default();
-    let mut successful_file_count = 0;
+    let mut total_file_count = 0;
+    let mut successful_args = 0;
+    let is_last = |index: usize| index == args.files.len() - 1;
 
     for (index, file) in args.files.iter().enumerate() {
         let path = Path::new(file);
-        match count_file(path) {
-            Ok(count) => {
-                let output = format_file_output(
-                    file,
-                    &count,
-                    args.show_lines(),
-                    args.show_words(),
-                    args.show_bytes(),
-                );
+
+        match process_path(path) {
+            Ok(result) => {
+                let kind = if path.is_dir() {
+                    OutputKind::Directory(result.file_count)
+                } else {
+                    OutputKind::File
+                };
+                let output = format_output(file, &result.count, kind, &args);
                 println!("{output}");
 
-                total_count += count;
-                successful_file_count += 1;
+                total_count += result.count;
+                total_file_count += result.file_count;
+                successful_args += 1;
 
-                // Blank line between files (not after last file)
-                if index < args.files.len() - 1 {
+                if !is_last(index) {
                     println!();
                 }
             }
@@ -46,19 +67,12 @@ fn main() {
         }
     }
 
-    // Show total only if 2+ files succeeded
-    if successful_file_count > 1 {
+    if successful_args > 1 {
         println!();
         println!("{}", format_separator());
         println!(
             "{}",
-            format_total_output(
-                successful_file_count,
-                &total_count,
-                args.show_lines(),
-                args.show_words(),
-                args.show_bytes(),
-            )
+            format_total_output(total_file_count, &total_count, &args)
         );
     }
 
