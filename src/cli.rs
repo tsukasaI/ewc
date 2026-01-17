@@ -1,9 +1,11 @@
 use clap::Parser;
 
 #[derive(Parser, Debug)]
-#[command(name = "ewc")]
-#[command(about = "Enhanced Word Count - A modern alternative to wc")]
-#[command(version)]
+#[command(
+    name = "ewc",
+    about = "Enhanced Word Count - A modern alternative to wc",
+    version
+)]
 pub struct Args {
     /// Files to process
     #[arg(value_name = "FILE")]
@@ -20,6 +22,26 @@ pub struct Args {
     /// Show byte count only
     #[arg(short = 'c', long)]
     pub bytes: bool,
+
+    /// Disable colors and icons
+    #[arg(long)]
+    pub no_color: bool,
+
+    /// Include hidden files and directories
+    #[arg(short = 'a', long)]
+    pub all: bool,
+
+    /// Compact one-line output format
+    #[arg(short = 'C', long)]
+    pub compact: bool,
+
+    /// Show file list for directories
+    #[arg(short = 'v', long)]
+    pub verbose: bool,
+
+    /// Output in JSON format
+    #[arg(long)]
+    pub json: bool,
 }
 
 impl Args {
@@ -44,14 +66,23 @@ impl Args {
 mod tests {
     use super::*;
 
-    #[test]
-    fn default_shows_all() {
-        let args = Args {
+    fn default_args() -> Args {
+        Args {
             files: vec![],
             lines: false,
             words: false,
             bytes: false,
-        };
+            no_color: false,
+            all: false,
+            compact: false,
+            verbose: false,
+            json: false,
+        }
+    }
+
+    #[test]
+    fn default_shows_all() {
+        let args = default_args();
         assert!(args.show_lines());
         assert!(args.show_words());
         assert!(args.show_bytes());
@@ -60,10 +91,8 @@ mod tests {
     #[test]
     fn lines_only() {
         let args = Args {
-            files: vec![],
             lines: true,
-            words: false,
-            bytes: false,
+            ..default_args()
         };
         assert!(args.show_lines());
         assert!(!args.show_words());
@@ -73,10 +102,8 @@ mod tests {
     #[test]
     fn words_only() {
         let args = Args {
-            files: vec![],
-            lines: false,
             words: true,
-            bytes: false,
+            ..default_args()
         };
         assert!(!args.show_lines());
         assert!(args.show_words());
@@ -86,10 +113,8 @@ mod tests {
     #[test]
     fn bytes_only() {
         let args = Args {
-            files: vec![],
-            lines: false,
-            words: false,
             bytes: true,
+            ..default_args()
         };
         assert!(!args.show_lines());
         assert!(!args.show_words());
@@ -99,13 +124,57 @@ mod tests {
     #[test]
     fn lines_and_words() {
         let args = Args {
-            files: vec![],
             lines: true,
             words: true,
-            bytes: false,
+            ..default_args()
         };
         assert!(args.show_lines());
         assert!(args.show_words());
         assert!(!args.show_bytes());
+    }
+
+    #[test]
+    fn no_color_flag_parsed() {
+        let args = Args {
+            no_color: true,
+            ..default_args()
+        };
+        assert!(args.no_color);
+    }
+
+    #[test]
+    fn all_flag_parsed() {
+        let args = Args {
+            all: true,
+            ..default_args()
+        };
+        assert!(args.all);
+    }
+
+    #[test]
+    fn compact_flag_parsed() {
+        let args = Args {
+            compact: true,
+            ..default_args()
+        };
+        assert!(args.compact);
+    }
+
+    #[test]
+    fn verbose_flag_parsed() {
+        let args = Args {
+            verbose: true,
+            ..default_args()
+        };
+        assert!(args.verbose);
+    }
+
+    #[test]
+    fn json_flag_parsed() {
+        let args = Args {
+            json: true,
+            ..default_args()
+        };
+        assert!(args.json);
     }
 }
