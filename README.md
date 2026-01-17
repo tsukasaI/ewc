@@ -1,91 +1,127 @@
-# ewc - Enhanced Word Count
+# ewc
 
-A modern, user-friendly alternative to the classic `wc` command, written in Rust.
+**A modern replacement for `wc`, written in Rust.**
 
-## Features
+`ewc` is a fast, user-friendly alternative to the classic Unix `wc` command. Like [eza](https://github.com/eza-community/eza) for `ls`, [fd](https://github.com/sharkdp/fd) for `find`, and [ripgrep](https://github.com/BurntSushi/ripgrep) for `grep`, `ewc` brings a better experience to word counting.
 
-- Readable output with clear labels (Lines, Words, Bytes)
-- Formatted numbers with comma separators (1,234,567)
-- File icons for visual clarity
-- Error handling with informative messages
+## Why ewc?
+
+| Feature | wc | ewc |
+|---------|-----|-----|
+| Human-readable output | No | Yes |
+| Number formatting (1,234) | No | Yes |
+| Visual file icons | No | Yes |
+| Clear labels | No | Yes |
+| Multiple file totals | Minimal | Clear summary |
+
+## Example
+
+```bash
+# wc output
+$ wc src/*.rs
+      68     148    1798 src/main.rs
+       3       9      46 src/lib.rs
+     145     310    3419 src/counter.rs
+     216     467    5263 total
+
+# ewc output
+$ ewc src/*.rs
+📄 src/main.rs
+   Lines:         68
+   Words:        148
+   Bytes:      1,798
+
+📄 src/lib.rs
+   Lines:          3
+   Words:          9
+   Bytes:         46
+
+📄 src/counter.rs
+   Lines:        145
+   Words:        310
+   Bytes:      3,419
+
+─────────────────────────
+📁 Total (3 files)
+   Lines:        216
+   Words:        467
+   Bytes:      5,263
+```
 
 ## Installation
 
 ```bash
+# From crates.io
+cargo install ewc
+
+# From source
 cargo install --path .
 ```
 
 ## Usage
 
 ```bash
-# Single file
-$ ewc file.txt
-📄 file.txt
-   Lines:         42
-   Words:         81
-   Bytes:        956
-
-# Lines only
-$ ewc -l file.txt
-📄 file.txt
-   Lines:         42
-
-# Words only
-$ ewc -w file.txt
-📄 file.txt
-   Words:         81
-
-# Bytes only
-$ ewc -c file.txt
-📄 file.txt
-   Bytes:        956
-
-# Combined options
-$ ewc -lw file.txt
-📄 file.txt
-   Lines:         42
-   Words:         81
+ewc [OPTIONS] [FILE]...
 ```
 
-## Options
+### Options
 
-```
-Usage: ewc [OPTIONS] [FILE]...
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--lines` | `-l` | Show line count only |
+| `--words` | `-w` | Show word count only |
+| `--bytes` | `-c` | Show byte count only |
+| `--help` | `-h` | Print help |
+| `--version` | `-V` | Print version |
 
-Arguments:
-  [FILE]...  Files to process
-
-Options:
-  -l, --lines    Show line count only
-  -w, --words    Show word count only
-  -c, --bytes    Show byte count only
-  -h, --help     Print help
-  -V, --version  Print version
-```
-
-## Development
+### Examples
 
 ```bash
-# Run tests
-cargo test
+# Count everything
+ewc file.txt
 
-# Check for errors
-cargo check
+# Lines only
+ewc -l file.txt
 
-# Run the program
-cargo run -- [OPTIONS] [FILE]...
+# Multiple options
+ewc -lw file.txt
+
+# Multiple files (shows total)
+ewc *.rs
 ```
 
-## Project Structure
+## Contributing
 
+### Prerequisites
+
+- [Nix](https://nixos.org/download.html) with flakes enabled
+- (Optional) [direnv](https://direnv.net/) for automatic environment loading
+
+### Setup
+
+```bash
+# Enter dev shell (installs git hooks automatically)
+nix develop
+
+# Or with direnv
+direnv allow
 ```
-src/
-├── main.rs      # CLI entry point
-├── lib.rs       # Module exports
-├── cli.rs       # Command-line argument parsing (clap)
-├── counter.rs   # Word/line/byte counting logic
-└── output.rs    # Output formatting
+
+### Development
+
+```bash
+cargo test       # Run tests
+cargo check      # Check for errors
+cargo run -- -l file.txt  # Run locally
 ```
+
+### Pre-commit Hooks
+
+Git hooks are managed by [git-hooks.nix](https://github.com/cachix/git-hooks.nix) and run automatically:
+
+- **rustfmt** - Code formatting
+- **clippy** - Linting (warnings as errors)
+- **cargo-check** - Build validation
 
 ## License
 
