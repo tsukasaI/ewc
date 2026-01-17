@@ -1,8 +1,9 @@
 use std::fs;
 use std::io;
+use std::ops::{Add, AddAssign};
 use std::path::Path;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Default, PartialEq)]
 pub struct Count {
     pub lines: usize,
     pub words: usize,
@@ -16,6 +17,26 @@ impl Count {
             words: content.split_whitespace().count(),
             bytes: content.len(),
         }
+    }
+}
+
+impl Add for Count {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        Self {
+            lines: self.lines + other.lines,
+            words: self.words + other.words,
+            bytes: self.bytes + other.bytes,
+        }
+    }
+}
+
+impl AddAssign for Count {
+    fn add_assign(&mut self, other: Self) {
+        self.lines += other.lines;
+        self.words += other.words;
+        self.bytes += other.bytes;
     }
 }
 
@@ -93,5 +114,31 @@ mod tests {
     fn count_file_not_found() {
         let result = count_file(Path::new("nonexistent_file.txt"));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn count_default() {
+        let count = Count::default();
+        assert_eq!(count.lines, 0);
+        assert_eq!(count.words, 0);
+        assert_eq!(count.bytes, 0);
+    }
+
+    #[test]
+    fn count_add() {
+        let count1 = Count {
+            lines: 10,
+            words: 50,
+            bytes: 200,
+        };
+        let count2 = Count {
+            lines: 5,
+            words: 25,
+            bytes: 100,
+        };
+        let total = count1 + count2;
+        assert_eq!(total.lines, 15);
+        assert_eq!(total.words, 75);
+        assert_eq!(total.bytes, 300);
     }
 }

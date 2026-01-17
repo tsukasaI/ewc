@@ -3,8 +3,8 @@ use std::path::Path;
 use std::process;
 
 use ewc::cli::Args;
-use ewc::counter::count_file;
-use ewc::output::format_file_output;
+use ewc::counter::{count_file, Count};
+use ewc::output::{format_file_output, format_separator, format_total_output};
 
 fn main() {
     let args = Args::parse();
@@ -15,8 +15,10 @@ fn main() {
     }
 
     let mut has_error = false;
+    let mut total_count = Count::default();
+    let mut successful_file_count = 0;
 
-    for file in &args.files {
+    for (index, file) in args.files.iter().enumerate() {
         let path = Path::new(file);
         match count_file(path) {
             Ok(count) => {
@@ -27,13 +29,37 @@ fn main() {
                     args.show_words(),
                     args.show_bytes(),
                 );
-                println!("{}", output);
+                println!("{output}");
+
+                total_count += count;
+                successful_file_count += 1;
+
+                // Blank line between files (not after last file)
+                if index < args.files.len() - 1 {
+                    println!();
+                }
             }
             Err(e) => {
-                eprintln!("\u{26A0}\u{FE0F}  {}: {}", file, e);
+                eprintln!("\u{26A0}\u{FE0F}  {file}: {e}");
                 has_error = true;
             }
         }
+    }
+
+    // Show total only if 2+ files succeeded
+    if successful_file_count > 1 {
+        println!();
+        println!("{}", format_separator());
+        println!(
+            "{}",
+            format_total_output(
+                successful_file_count,
+                &total_count,
+                args.show_lines(),
+                args.show_words(),
+                args.show_bytes(),
+            )
+        );
     }
 
     if has_error {
