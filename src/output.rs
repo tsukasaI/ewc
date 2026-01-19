@@ -18,6 +18,12 @@ pub fn format_number(n: usize) -> String {
 
 fn format_count_lines(count: &Count, args: &Args) -> Vec<String> {
     let mut lines = Vec::new();
+    if args.show_max_line_length() {
+        lines.push(format!(
+            "Max Line: {:>10}",
+            format_number(count.max_line_length)
+        ));
+    }
     if args.show_lines() {
         lines.push(format!("   Lines: {:>10}", format_number(count.lines)));
     }
@@ -69,6 +75,9 @@ pub fn format_separator() -> &'static str {
 
 fn format_compact_counts(count: &Count, args: &Args) -> String {
     let mut parts = Vec::new();
+    if args.show_max_line_length() {
+        parts.push(format!("max:{}", format_number(count.max_line_length)));
+    }
     if args.show_lines() {
         parts.push(format!("{} lines", format_number(count.lines)));
     }
@@ -101,9 +110,10 @@ pub fn format_compact_total(file_count: usize, count: &Count, args: &Args) -> St
 }
 
 fn format_single_count(count: &Count, args: &Args) -> String {
-    let (value, unit) = match (args.lines, args.words, args.bytes) {
-        (false, true, false) => (count.words, "words"),
-        (false, false, true) => (count.bytes, "bytes"),
+    let (value, unit) = match (args.lines, args.words, args.bytes, args.max_line_length) {
+        (false, true, false, false) => (count.words, "words"),
+        (false, false, true, false) => (count.bytes, "bytes"),
+        (false, false, false, true) => (count.max_line_length, "max"),
         _ => (count.lines, "lines"),
     };
     format!("{} {unit}", format_number(value))
@@ -148,17 +158,19 @@ pub struct JsonFileResult {
 pub fn format_json_single(result: &JsonFileResult) -> String {
     if result.is_directory {
         format!(
-            r#"{{"directory":"{}","file_count":{},"lines":{},"words":{},"bytes":{}}}"#,
+            r#"{{"directory":"{}","file_count":{},"max_line_length":{},"lines":{},"words":{},"bytes":{}}}"#,
             escape_json(&result.name),
             result.file_count.unwrap_or(0),
+            result.count.max_line_length,
             result.count.lines,
             result.count.words,
             result.count.bytes
         )
     } else {
         format!(
-            r#"{{"file":"{}","lines":{},"words":{},"bytes":{}}}"#,
+            r#"{{"file":"{}","max_line_length":{},"lines":{},"words":{},"bytes":{}}}"#,
             escape_json(&result.name),
+            result.count.max_line_length,
             result.count.lines,
             result.count.words,
             result.count.bytes
@@ -171,9 +183,10 @@ pub fn format_json_multiple(results: &[JsonFileResult], total: &Count) -> String
     let total_file_count: usize = results.iter().map(|r| r.file_count.unwrap_or(1)).sum();
 
     format!(
-        r#"{{"files":[{}],"total":{{"file_count":{},"lines":{},"words":{},"bytes":{}}}}}"#,
+        r#"{{"files":[{}],"total":{{"file_count":{},"max_line_length":{},"lines":{},"words":{},"bytes":{}}}}}"#,
         files_json.join(","),
         total_file_count,
+        total.max_line_length,
         total.lines,
         total.words,
         total.bytes
@@ -206,6 +219,7 @@ mod tests {
             lines: false,
             words: false,
             bytes: false,
+            max_line_length: false,
             no_color: false,
             all: false,
             compact: false,
@@ -235,6 +249,7 @@ mod tests {
             lines: 50,
             words: 200,
             bytes: 1500,
+            max_line_length: 80,
         };
         let args = default_args();
         let output = format_output("file.txt", &count, OutputKind::File, &args);
@@ -253,6 +268,7 @@ mod tests {
             lines: 50,
             words: 200,
             bytes: 1500,
+            max_line_length: 80,
         };
         let args = Args {
             lines: true,
@@ -277,6 +293,7 @@ mod tests {
             lines: 80,
             words: 300,
             bytes: 2300,
+            max_line_length: 120,
         };
         let args = default_args();
         let output = format_total_output(2, &count, &args);
@@ -306,6 +323,7 @@ mod tests {
             lines: 80,
             words: 300,
             bytes: 2300,
+            max_line_length: 120,
         };
         let args = Args {
             lines: true,
@@ -323,6 +341,7 @@ mod tests {
             lines: 1234,
             words: 5678,
             bytes: 45000,
+            max_line_length: 200,
         };
         let args = default_args();
         let output = format_output("src/", &count, OutputKind::Directory(5), &args);
@@ -341,6 +360,7 @@ mod tests {
             lines: 10,
             words: 20,
             bytes: 100,
+            max_line_length: 50,
         };
         let args = default_args();
         let output = format_output("dir/", &count, OutputKind::Directory(1), &args);
@@ -353,6 +373,7 @@ mod tests {
             lines: 50,
             words: 200,
             bytes: 1500,
+            max_line_length: 80,
         };
         let args = Args {
             no_color: true,
@@ -369,6 +390,7 @@ mod tests {
             lines: 50,
             words: 200,
             bytes: 1500,
+            max_line_length: 80,
         };
         let args = Args {
             no_color: true,
@@ -385,6 +407,7 @@ mod tests {
             lines: 80,
             words: 300,
             bytes: 2300,
+            max_line_length: 120,
         };
         let args = Args {
             no_color: true,
@@ -401,6 +424,7 @@ mod tests {
             lines: 50,
             words: 200,
             bytes: 1500,
+            max_line_length: 80,
         };
         let args = Args {
             compact: true,
@@ -420,6 +444,7 @@ mod tests {
             lines: 50,
             words: 200,
             bytes: 1500,
+            max_line_length: 80,
         };
         let args = Args {
             lines: true,
@@ -438,6 +463,7 @@ mod tests {
             lines: 150,
             words: 500,
             bytes: 3000,
+            max_line_length: 100,
         };
         let args = Args {
             compact: true,
@@ -454,6 +480,7 @@ mod tests {
             lines: 235,
             words: 800,
             bytes: 5000,
+            max_line_length: 150,
         };
         let args = Args {
             compact: true,
@@ -462,5 +489,43 @@ mod tests {
         let output = format_compact_total(5, &count, &args);
         assert!(output.contains("Total (5 files):"));
         assert!(output.contains("235 lines"));
+    }
+
+    #[test]
+    fn format_output_max_line_length_only() {
+        let count = Count {
+            lines: 50,
+            words: 200,
+            bytes: 1500,
+            max_line_length: 120,
+        };
+        let args = Args {
+            max_line_length: true,
+            ..default_args()
+        };
+        let output = format_output("file.txt", &count, OutputKind::File, &args);
+        assert!(output.contains("Max Line:"));
+        assert!(output.contains("120"));
+        assert!(!output.contains("Lines:"));
+        assert!(!output.contains("Words:"));
+        assert!(!output.contains("Bytes:"));
+    }
+
+    #[test]
+    fn format_compact_with_max_line_length() {
+        let count = Count {
+            lines: 50,
+            words: 200,
+            bytes: 1500,
+            max_line_length: 120,
+        };
+        let args = Args {
+            max_line_length: true,
+            compact: true,
+            ..default_args()
+        };
+        let output = format_compact_output("file.txt", &count, OutputKind::File, &args);
+        assert!(output.contains("max:120"));
+        assert!(!output.contains("lines"));
     }
 }

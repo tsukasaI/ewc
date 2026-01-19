@@ -23,6 +23,10 @@ pub struct Args {
     #[arg(short = 'c', long)]
     pub bytes: bool,
 
+    /// Show longest line length
+    #[arg(short = 'L', long)]
+    pub max_line_length: bool,
+
     /// Disable colors and icons
     #[arg(long)]
     pub no_color: bool,
@@ -57,8 +61,12 @@ impl Args {
         self.bytes || self.show_all()
     }
 
+    pub fn show_max_line_length(&self) -> bool {
+        self.max_line_length
+    }
+
     fn show_all(&self) -> bool {
-        !self.lines && !self.words && !self.bytes
+        !self.lines && !self.words && !self.bytes && !self.max_line_length
     }
 }
 
@@ -72,6 +80,7 @@ mod tests {
             lines: false,
             words: false,
             bytes: false,
+            max_line_length: false,
             no_color: false,
             all: false,
             compact: false,
@@ -176,5 +185,27 @@ mod tests {
             ..default_args()
         };
         assert!(args.json);
+    }
+
+    #[test]
+    fn max_line_length_flag_parsed() {
+        let args = Args {
+            max_line_length: true,
+            ..default_args()
+        };
+        assert!(args.max_line_length);
+        assert!(args.show_max_line_length());
+    }
+
+    #[test]
+    fn max_line_length_only_shows_max_line() {
+        let args = Args {
+            max_line_length: true,
+            ..default_args()
+        };
+        assert!(!args.show_lines());
+        assert!(!args.show_words());
+        assert!(!args.show_bytes());
+        assert!(args.show_max_line_length());
     }
 }

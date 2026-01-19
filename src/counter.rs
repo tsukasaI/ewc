@@ -14,6 +14,7 @@ pub struct Count {
     pub lines: usize,
     pub words: usize,
     pub bytes: usize,
+    pub max_line_length: usize,
 }
 
 impl Count {
@@ -22,6 +23,7 @@ impl Count {
             lines: content.lines().count(),
             words: content.split_whitespace().count(),
             bytes: content.len(),
+            max_line_length: content.lines().map(|l| l.len()).max().unwrap_or(0),
         }
     }
 }
@@ -34,6 +36,7 @@ impl Add for Count {
             lines: self.lines + other.lines,
             words: self.words + other.words,
             bytes: self.bytes + other.bytes,
+            max_line_length: self.max_line_length.max(other.max_line_length),
         }
     }
 }
@@ -43,6 +46,7 @@ impl AddAssign for Count {
         self.lines += other.lines;
         self.words += other.words;
         self.bytes += other.bytes;
+        self.max_line_length = self.max_line_length.max(other.max_line_length);
     }
 }
 
@@ -111,6 +115,7 @@ mod tests {
         assert_eq!(count.lines, 0);
         assert_eq!(count.words, 0);
         assert_eq!(count.bytes, 0);
+        assert_eq!(count.max_line_length, 0);
     }
 
     #[test]
@@ -119,6 +124,7 @@ mod tests {
         assert_eq!(count.lines, 1);
         assert_eq!(count.words, 1);
         assert_eq!(count.bytes, 5);
+        assert_eq!(count.max_line_length, 5);
     }
 
     #[test]
@@ -127,6 +133,7 @@ mod tests {
         assert_eq!(count.lines, 2);
         assert_eq!(count.words, 2);
         assert_eq!(count.bytes, 11);
+        assert_eq!(count.max_line_length, 5);
     }
 
     #[test]
@@ -178,6 +185,13 @@ mod tests {
         assert_eq!(count.lines, 0);
         assert_eq!(count.words, 0);
         assert_eq!(count.bytes, 0);
+        assert_eq!(count.max_line_length, 0);
+    }
+
+    #[test]
+    fn count_max_line_length_varies() {
+        let count = Count::from_content("short\nlonger line here\nmed");
+        assert_eq!(count.max_line_length, 16); // "longer line here"
     }
 
     #[test]
@@ -186,16 +200,19 @@ mod tests {
             lines: 10,
             words: 50,
             bytes: 200,
+            max_line_length: 80,
         };
         let count2 = Count {
             lines: 5,
             words: 25,
             bytes: 100,
+            max_line_length: 120,
         };
         let total = count1 + count2;
         assert_eq!(total.lines, 15);
         assert_eq!(total.words, 75);
         assert_eq!(total.bytes, 300);
+        assert_eq!(total.max_line_length, 120); // Takes max of the two
     }
 
     #[test]
