@@ -71,6 +71,11 @@ ewc [OPTIONS] [FILE]...
 | `--lines` | `-l` | Show line count only |
 | `--words` | `-w` | Show word count only |
 | `--bytes` | `-c` | Show byte count only |
+| `--verbose` | `-v` | Show file list (directories) |
+| `--all` | `-a` | Include hidden files |
+| `--compact` | `-C` | Single-line output |
+| `--no-color` | | Disable icons |
+| `--json` | | JSON output |
 | `--help` | `-h` | Print help |
 | `--version` | `-V` | Print version |
 
@@ -83,11 +88,17 @@ ewc file.txt
 # Lines only
 ewc -l file.txt
 
-# Multiple options
-ewc -lw file.txt
-
 # Multiple files (shows total)
 ewc *.rs
+
+# Directory
+ewc src/
+
+# Pipe from stdin
+cat file.txt | ewc
+
+# JSON output
+ewc --json file.txt
 ```
 
 ## Contributing

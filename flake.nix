@@ -36,6 +36,7 @@
           pkgs.rustc
           pkgs.rustfmt
           pkgs.clippy
+          pkgs.git-cliff
         ] ++ self.checks.${system}.pre-commit.enabledPackages;
       };
     };
