@@ -1,5 +1,8 @@
+use globset::{Glob, GlobSet, GlobSetBuilder};
+use rayon::prelude::*;
 use std::fs;
 use std::io::{self, Read};
+use std::iter::Sum;
 use std::ops::{Add, AddAssign};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
@@ -50,6 +53,52 @@ impl AddAssign for Count {
     }
 }
 
+impl Sum for Count {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Self::default(), |acc, c| acc + c)
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct FilterConfig {
+    pub include_hidden: bool,
+    pub exclude_patterns: Vec<String>,
+    pub include_patterns: Vec<String>,
+}
+
+impl FilterConfig {
+    pub fn new(
+        include_hidden: bool,
+        exclude_patterns: Vec<String>,
+        include_patterns: Vec<String>,
+    ) -> Self {
+        Self {
+            include_hidden,
+            exclude_patterns,
+            include_patterns,
+        }
+    }
+
+    fn build_globset(patterns: &[String]) -> io::Result<GlobSet> {
+        let mut builder = GlobSetBuilder::new();
+        for pattern in patterns {
+            let glob = Glob::new(pattern).map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("Invalid glob pattern '{}': {}", pattern, e),
+                )
+            })?;
+            builder.add(glob);
+        }
+        builder.build().map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("Failed to build glob set: {}", e),
+            )
+        })
+    }
+}
+
 pub fn count_file(path: &Path) -> io::Result<Count> {
     let content = fs::read_to_string(path)?;
     Ok(Count::from_content(&content))
@@ -68,40 +117,66 @@ fn is_hidden(entry: &walkdir::DirEntry) -> bool {
         .is_some_and(|s| s.starts_with('.'))
 }
 
-fn walk_directory(
-    path: &Path,
-    include_hidden: bool,
-) -> impl Iterator<Item = walkdir::DirEntry> + '_ {
-    WalkDir::new(path)
-        .into_iter()
-        .filter_entry(move |e| e.depth() == 0 || include_hidden || !is_hidden(e))
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
+fn matches_glob(glob_set: &GlobSet, relative_path: &Path) -> bool {
+    let path_str = relative_path.to_string_lossy();
+    glob_set.is_match(&*path_str) || glob_set.is_match(relative_path)
 }
 
-pub fn count_directory(path: &Path, include_hidden: bool) -> io::Result<(Count, usize)> {
-    let (entries, total) = count_directory_detailed(path, include_hidden)?;
+fn walk_directory(path: &Path, config: &FilterConfig) -> io::Result<Vec<PathBuf>> {
+    let exclude_set = FilterConfig::build_globset(&config.exclude_patterns)?;
+    let include_set = FilterConfig::build_globset(&config.include_patterns)?;
+    let has_include_patterns = !config.include_patterns.is_empty();
+
+    let entries = WalkDir::new(path)
+        .into_iter()
+        .filter_entry(|e| e.depth() == 0 || config.include_hidden || !is_hidden(e))
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .filter_map(|entry| {
+            let file_path = entry.path();
+            let relative_path = file_path.strip_prefix(path).unwrap_or(file_path);
+
+            if matches_glob(&exclude_set, relative_path) {
+                return None;
+            }
+
+            if has_include_patterns && !matches_glob(&include_set, relative_path) {
+                return None;
+            }
+
+            Some(file_path.to_path_buf())
+        })
+        .collect();
+
+    Ok(entries)
+}
+
+pub fn count_directory(path: &Path, config: &FilterConfig) -> io::Result<(Count, usize)> {
+    let (entries, total) = count_directory_detailed(path, config)?;
     Ok((total, entries.len()))
 }
 
 pub fn count_directory_detailed(
     path: &Path,
-    include_hidden: bool,
+    config: &FilterConfig,
 ) -> io::Result<(Vec<FileEntry>, Count)> {
-    let mut entries: Vec<FileEntry> = walk_directory(path, include_hidden)
-        .filter_map(|entry| {
-            count_file(entry.path()).ok().map(|count| FileEntry {
-                path: entry.path().to_path_buf(),
+    let file_paths = walk_directory(path, config)?;
+
+    // Parallel file counting with rayon
+    let mut entries: Vec<FileEntry> = file_paths
+        .par_iter()
+        .filter_map(|file_path| {
+            count_file(file_path).ok().map(|count| FileEntry {
+                path: file_path.clone(),
                 count,
             })
         })
         .collect();
 
+    // Sort for deterministic output
     entries.sort_by(|a, b| a.path.cmp(&b.path));
 
-    let total = entries
-        .iter()
-        .fold(Count::default(), |acc, e| acc + e.count.clone());
+    let total = entries.iter().map(|e| e.count.clone()).sum();
     Ok((entries, total))
 }
 
@@ -215,6 +290,14 @@ mod tests {
         assert_eq!(total.max_line_length, 120); // Takes max of the two
     }
 
+    fn default_config() -> FilterConfig {
+        FilterConfig::default()
+    }
+
+    fn config_with_hidden() -> FilterConfig {
+        FilterConfig::new(true, vec![], vec![])
+    }
+
     #[test]
     fn count_directory_with_single_file() {
         use std::io::Write;
@@ -223,7 +306,7 @@ mod tests {
         let mut file = std::fs::File::create(&file_path).unwrap();
         writeln!(file, "hello world").unwrap();
 
-        let result = count_directory(dir.path(), false);
+        let result = count_directory(dir.path(), &default_config());
         assert!(result.is_ok());
         let (count, file_count) = result.unwrap();
         assert_eq!(file_count, 1);
@@ -244,7 +327,7 @@ mod tests {
         let mut f2 = std::fs::File::create(&file2).unwrap();
         writeln!(f2, "world").unwrap();
 
-        let result = count_directory(dir.path(), false);
+        let result = count_directory(dir.path(), &default_config());
         assert!(result.is_ok());
         let (count, file_count) = result.unwrap();
         assert_eq!(file_count, 2);
@@ -269,7 +352,7 @@ mod tests {
         let mut f2 = std::fs::File::create(&file2).unwrap();
         writeln!(f2, "nested file").unwrap();
 
-        let result = count_directory(dir.path(), false);
+        let result = count_directory(dir.path(), &default_config());
         assert!(result.is_ok());
         let (count, file_count) = result.unwrap();
         assert_eq!(file_count, 2);
@@ -292,7 +375,7 @@ mod tests {
         let mut f2 = std::fs::File::create(&file2).unwrap();
         writeln!(f2, "hidden").unwrap();
 
-        let result = count_directory(dir.path(), false);
+        let result = count_directory(dir.path(), &default_config());
         assert!(result.is_ok());
         let (count, file_count) = result.unwrap();
         assert_eq!(file_count, 1); // Only visible file
@@ -316,7 +399,7 @@ mod tests {
         let mut f2 = std::fs::File::create(&file2).unwrap();
         writeln!(f2, "nested in hidden").unwrap();
 
-        let result = count_directory(dir.path(), false);
+        let result = count_directory(dir.path(), &default_config());
         assert!(result.is_ok());
         let (count, file_count) = result.unwrap();
         assert_eq!(file_count, 1); // Only visible file
@@ -338,7 +421,7 @@ mod tests {
         let mut f2 = std::fs::File::create(&file2).unwrap();
         writeln!(f2, "hidden").unwrap();
 
-        let result = count_directory(dir.path(), true);
+        let result = count_directory(dir.path(), &config_with_hidden());
         assert!(result.is_ok());
         let (count, file_count) = result.unwrap();
         assert_eq!(file_count, 2); // Both files
@@ -362,7 +445,7 @@ mod tests {
         let mut f2 = std::fs::File::create(&file2).unwrap();
         writeln!(f2, "nested in hidden").unwrap();
 
-        let result = count_directory(dir.path(), true);
+        let result = count_directory(dir.path(), &config_with_hidden());
         assert!(result.is_ok());
         let (count, file_count) = result.unwrap();
         assert_eq!(file_count, 2); // Both files
@@ -382,7 +465,7 @@ mod tests {
         let mut f2 = std::fs::File::create(&file2).unwrap();
         writeln!(f2, "foo").unwrap();
 
-        let result = count_directory_detailed(dir.path(), false);
+        let result = count_directory_detailed(dir.path(), &default_config());
         assert!(result.is_ok());
         let (entries, total) = result.unwrap();
 
@@ -400,7 +483,7 @@ mod tests {
         std::fs::write(dir.path().join("a_file.txt"), "a\n").unwrap();
         std::fs::write(dir.path().join("m_file.txt"), "m\n").unwrap();
 
-        let result = count_directory_detailed(dir.path(), false);
+        let result = count_directory_detailed(dir.path(), &default_config());
         assert!(result.is_ok());
         let (entries, _) = result.unwrap();
 
@@ -408,6 +491,100 @@ mod tests {
         assert!(entries[0].path.to_string_lossy().contains("a_file"));
         assert!(entries[1].path.to_string_lossy().contains("m_file"));
         assert!(entries[2].path.to_string_lossy().contains("z_file"));
+    }
+
+    // Phase 7: exclude/include pattern tests
+    #[test]
+    fn count_directory_exclude_pattern() {
+        let dir = tempfile::tempdir().unwrap();
+
+        std::fs::write(dir.path().join("file.rs"), "rust code\n").unwrap();
+        std::fs::write(dir.path().join("file.md"), "markdown\n").unwrap();
+        std::fs::write(dir.path().join("file.txt"), "text\n").unwrap();
+
+        let config = FilterConfig::new(false, vec!["*.md".to_string()], vec![]);
+        let result = count_directory(dir.path(), &config);
+        assert!(result.is_ok());
+        let (count, file_count) = result.unwrap();
+        assert_eq!(file_count, 2); // .rs and .txt only
+        assert_eq!(count.words, 3); // "rust code" + "text"
+    }
+
+    #[test]
+    fn count_directory_include_pattern() {
+        let dir = tempfile::tempdir().unwrap();
+
+        std::fs::write(dir.path().join("file.rs"), "rust code\n").unwrap();
+        std::fs::write(dir.path().join("file.md"), "markdown\n").unwrap();
+        std::fs::write(dir.path().join("file.txt"), "text\n").unwrap();
+
+        let config = FilterConfig::new(false, vec![], vec!["*.rs".to_string()]);
+        let result = count_directory(dir.path(), &config);
+        assert!(result.is_ok());
+        let (count, file_count) = result.unwrap();
+        assert_eq!(file_count, 1); // .rs only
+        assert_eq!(count.words, 2); // "rust code"
+    }
+
+    #[test]
+    fn count_directory_exclude_and_include_pattern() {
+        let dir = tempfile::tempdir().unwrap();
+
+        std::fs::write(dir.path().join("main.rs"), "main\n").unwrap();
+        std::fs::write(dir.path().join("lib.rs"), "lib\n").unwrap();
+        std::fs::write(dir.path().join("test_main.rs"), "test\n").unwrap();
+        std::fs::write(dir.path().join("file.txt"), "text\n").unwrap();
+
+        // Include only .rs files, but exclude test_*.rs
+        let config = FilterConfig::new(
+            false,
+            vec!["test_*.rs".to_string()],
+            vec!["*.rs".to_string()],
+        );
+        let result = count_directory(dir.path(), &config);
+        assert!(result.is_ok());
+        let (count, file_count) = result.unwrap();
+        assert_eq!(file_count, 2); // main.rs and lib.rs only
+        assert_eq!(count.words, 2); // "main" + "lib"
+    }
+
+    #[test]
+    fn count_directory_exclude_directory_pattern() {
+        let dir = tempfile::tempdir().unwrap();
+
+        std::fs::write(dir.path().join("root.txt"), "root\n").unwrap();
+
+        let subdir = dir.path().join("target");
+        std::fs::create_dir(&subdir).unwrap();
+        std::fs::write(subdir.join("build.txt"), "build\n").unwrap();
+
+        let config = FilterConfig::new(false, vec!["target/*".to_string()], vec![]);
+        let result = count_directory(dir.path(), &config);
+        assert!(result.is_ok());
+        let (count, file_count) = result.unwrap();
+        assert_eq!(file_count, 1); // Only root.txt
+        assert_eq!(count.words, 1); // "root"
+    }
+
+    #[test]
+    fn count_directory_multiple_exclude_patterns() {
+        let dir = tempfile::tempdir().unwrap();
+
+        std::fs::write(dir.path().join("file.rs"), "rust\n").unwrap();
+        std::fs::write(dir.path().join("file.md"), "markdown\n").unwrap();
+        std::fs::write(dir.path().join("file.txt"), "text\n").unwrap();
+        std::fs::write(dir.path().join("Cargo.lock"), "lock\n").unwrap();
+
+        let config = FilterConfig::new(
+            false,
+            vec!["*.md".to_string(), "*.lock".to_string()],
+            vec![],
+        );
+        let result = count_directory(dir.path(), &config);
+        assert!(result.is_ok());
+        let (count, file_count) = result.unwrap();
+        assert_eq!(file_count, 2); // .rs and .txt only
+        assert_eq!(count.words, 2); // "rust" + "text"
     }
 
     // Phase 5: stdin support tests

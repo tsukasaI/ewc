@@ -225,6 +225,8 @@ mod tests {
             compact: false,
             verbose: false,
             json: false,
+            exclude: vec![],
+            include: vec![],
         }
     }
 

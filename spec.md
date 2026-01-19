@@ -71,11 +71,14 @@ $ ewc -v src/
 | `--lines` | `-l` | Show line count only |
 | `--words` | `-w` | Show word count only |
 | `--bytes` | `-c` | Show byte count only |
+| `--max-line-length` | `-L` | Show longest line length |
 | `--verbose` | `-v` | Show file list (directories) |
 | `--all` | `-a` | Include hidden files/directories |
 | `--compact` | `-C` | Single-line output |
 | `--no-color` | - | Disable icons |
 | `--json` | - | JSON output |
+| `--exclude` | - | Exclude files matching glob pattern (repeatable) |
+| `--include` | - | Include only files matching glob pattern (repeatable) |
 
 ## Behavior Details
 
@@ -153,17 +156,11 @@ ewc/
     └── integration.rs # Integration tests
 ```
 
-## Future Phases
+## Advanced Features
 
-### Phase 6: Longest Line Length (`-L`)
+### Longest Line Length (`-L`)
 
-Add `-L` / `--max-line-length` option to report the length of the longest line.
-
-#### Option
-
-| Option | Short | Description |
-|--------|-------|-------------|
-| `--max-line-length` | `-L` | Show longest line length |
+The `-L` / `--max-line-length` option reports the length of the longest line.
 
 #### Output
 
@@ -171,23 +168,30 @@ Add `-L` / `--max-line-length` option to report the length of the longest line.
 $ ewc -L file.txt
 📄 file.txt
    Max Line:      120
+```
+
+#### With Other Metrics
+
+```bash
+$ ewc -L -l -w file.txt
+📄 file.txt
+   Max Line:      120
    Lines:          50
    Words:         200
-   Bytes:       1,500
 ```
 
 #### Compact Mode
 
 ```bash
 $ ewc -L -C file.txt
-📄 file.txt  max:120 lines:50 words:200 bytes:1500
+file.txt: max:120
 ```
 
 #### JSON Output
 
 ```json
 {
-  "path": "file.txt",
+  "file": "file.txt",
   "max_line_length": 120,
   "lines": 50,
   "words": 200,
@@ -197,29 +201,22 @@ $ ewc -L -C file.txt
 
 ---
 
-### Phase 7: Exclude/Include Patterns
+### Exclude/Include Patterns
 
-Add `--exclude` and `--include` glob patterns to filter files during directory traversal.
-
-#### Options
-
-| Option | Description |
-|--------|-------------|
-| `--exclude <PATTERN>` | Exclude files matching glob pattern (repeatable) |
-| `--include <PATTERN>` | Include only files matching glob pattern (repeatable) |
+The `--exclude` and `--include` options filter files during directory traversal using glob patterns.
 
 #### Behavior
 
 - Patterns use glob syntax (`*`, `**`, `?`, `[...]`)
 - `--exclude` takes precedence over `--include`
-- Multiple patterns can be specified
-- Patterns apply to directory traversal only
+- Multiple patterns can be specified (options are repeatable)
+- Patterns match against relative paths from the walk root
 
 #### Examples
 
 ```bash
-# Exclude test files
-$ ewc --exclude "*.test.rs" src/
+# Exclude markdown files
+$ ewc --exclude "*.md" src/
 
 # Exclude multiple patterns
 $ ewc --exclude "target/*" --exclude "*.lock" .
@@ -227,24 +224,24 @@ $ ewc --exclude "target/*" --exclude "*.lock" .
 # Include only Rust files
 $ ewc --include "*.rs" src/
 
-# Combine include and exclude
+# Combine: only Rust files, excluding tests
 $ ewc --include "*.rs" --exclude "*_test.rs" src/
 ```
 
 ---
 
-### Phase 8: Parallel Processing
+### Parallel Processing
 
-Add parallel file processing for faster directory scanning.
+Directory scanning uses parallel file processing via `rayon` for improved performance on large directories.
 
 #### Behavior
 
-- Uses `rayon` for parallel file processing
-- Automatically parallelizes directory traversal
-- Maintains deterministic output order (sorted)
+- Automatically parallelizes file counting in directories
+- Maintains deterministic output order (files are sorted after parallel collection)
 - No change for single files or stdin
+- Significant speedup on directories with many files
 
-#### Performance
+#### Example
 
 ```bash
 # Large directory benefits from parallelization

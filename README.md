@@ -71,11 +71,14 @@ ewc [OPTIONS] [FILE]...
 | `--lines` | `-l` | Show line count only |
 | `--words` | `-w` | Show word count only |
 | `--bytes` | `-c` | Show byte count only |
+| `--max-line-length` | `-L` | Show longest line length |
 | `--verbose` | `-v` | Show file list (directories) |
 | `--all` | `-a` | Include hidden files |
 | `--compact` | `-C` | Single-line output |
 | `--no-color` | | Disable icons |
 | `--json` | | JSON output |
+| `--exclude` | | Exclude files matching glob pattern (repeatable) |
+| `--include` | | Include only files matching glob pattern (repeatable) |
 | `--help` | `-h` | Print help |
 | `--version` | `-V` | Print version |
 
@@ -88,6 +91,9 @@ ewc file.txt
 # Lines only
 ewc -l file.txt
 
+# Longest line length
+ewc -L file.txt
+
 # Multiple files (shows total)
 ewc *.rs
 
@@ -99,6 +105,15 @@ cat file.txt | ewc
 
 # JSON output
 ewc --json file.txt
+
+# Filter by pattern (Rust files only)
+ewc --include "*.rs" src/
+
+# Exclude patterns
+ewc --exclude "*.md" --exclude "target/*" .
+
+# Combine include and exclude
+ewc --include "*.rs" --exclude "*_test.rs" src/
 ```
 
 ## Contributing

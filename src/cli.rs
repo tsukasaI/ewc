@@ -46,6 +46,14 @@ pub struct Args {
     /// Output in JSON format
     #[arg(long)]
     pub json: bool,
+
+    /// Exclude files matching glob pattern (repeatable)
+    #[arg(long, value_name = "PATTERN")]
+    pub exclude: Vec<String>,
+
+    /// Include only files matching glob pattern (repeatable)
+    #[arg(long, value_name = "PATTERN")]
+    pub include: Vec<String>,
 }
 
 impl Args {
@@ -86,6 +94,8 @@ mod tests {
             compact: false,
             verbose: false,
             json: false,
+            exclude: vec![],
+            include: vec![],
         }
     }
 
@@ -207,5 +217,26 @@ mod tests {
         assert!(!args.show_words());
         assert!(!args.show_bytes());
         assert!(args.show_max_line_length());
+    }
+
+    #[test]
+    fn exclude_patterns_parsed() {
+        let args = Args {
+            exclude: vec!["*.md".to_string(), "target/*".to_string()],
+            ..default_args()
+        };
+        assert_eq!(args.exclude.len(), 2);
+        assert_eq!(args.exclude[0], "*.md");
+        assert_eq!(args.exclude[1], "target/*");
+    }
+
+    #[test]
+    fn include_patterns_parsed() {
+        let args = Args {
+            include: vec!["*.rs".to_string()],
+            ..default_args()
+        };
+        assert_eq!(args.include.len(), 1);
+        assert_eq!(args.include[0], "*.rs");
     }
 }

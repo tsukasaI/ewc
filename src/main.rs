@@ -5,7 +5,7 @@ use std::process;
 
 use ewc::cli::Args;
 use ewc::counter::{
-    count_directory, count_directory_detailed, count_file, count_from_reader, Count,
+    count_directory, count_directory_detailed, count_file, count_from_reader, Count, FilterConfig,
 };
 use ewc::output::{
     format_compact_output, format_compact_total, format_json_multiple, format_json_single,
@@ -20,9 +20,9 @@ struct ProcessResult {
     file_count: usize,
 }
 
-fn process_path(path: &Path, include_hidden: bool) -> io::Result<ProcessResult> {
+fn process_path(path: &Path, config: &FilterConfig) -> io::Result<ProcessResult> {
     if path.is_dir() {
-        let (count, file_count) = count_directory(path, include_hidden)?;
+        let (count, file_count) = count_directory(path, config)?;
         Ok(ProcessResult { count, file_count })
     } else {
         let count = count_file(path)?;
@@ -31,6 +31,10 @@ fn process_path(path: &Path, include_hidden: bool) -> io::Result<ProcessResult> 
             file_count: 1,
         })
     }
+}
+
+fn create_filter_config(args: &Args) -> FilterConfig {
+    FilterConfig::new(args.all, args.exclude.clone(), args.include.clone())
 }
 
 fn main() {
@@ -79,10 +83,11 @@ fn run_json_mode(args: &Args) {
     let mut results: Vec<JsonFileResult> = Vec::new();
     let mut total_count = Count::default();
     let mut has_error = false;
+    let config = create_filter_config(args);
 
     for file in &args.files {
         let path = Path::new(file);
-        let Ok(result) = process_path(path, args.all) else {
+        let Ok(result) = process_path(path, &config) else {
             has_error = true;
             continue;
         };
@@ -114,13 +119,14 @@ fn run_normal_mode(args: &Args) {
     let mut total_file_count = 0;
     let mut successful_args = 0;
     let file_count = args.files.len();
+    let config = create_filter_config(args);
 
     for (index, file) in args.files.iter().enumerate() {
         let path = Path::new(file);
         let is_last = index == file_count - 1;
 
         if path.is_dir() && args.verbose {
-            match count_directory_detailed(path, args.all) {
+            match count_directory_detailed(path, &config) {
                 Ok((entries, dir_total)) => {
                     println!("{}", format_verbose_output(&entries, &dir_total, args));
 
@@ -138,18 +144,19 @@ fn run_normal_mode(args: &Args) {
                 }
             }
         } else {
-            match process_path(path, args.all) {
+            match process_path(path, &config) {
                 Ok(result) => {
-                    let kind = match path.is_dir() {
-                        true => OutputKind::Directory(result.file_count),
-                        false => OutputKind::File,
-                    };
-                    let format_fn = if args.compact {
-                        format_compact_output
+                    let kind = if path.is_dir() {
+                        OutputKind::Directory(result.file_count)
                     } else {
-                        format_output
+                        OutputKind::File
                     };
-                    println!("{}", format_fn(file, &result.count, kind, args));
+                    let output = if args.compact {
+                        format_compact_output(file, &result.count, kind, args)
+                    } else {
+                        format_output(file, &result.count, kind, args)
+                    };
+                    println!("{output}");
 
                     total_count += result.count;
                     total_file_count += result.file_count;
