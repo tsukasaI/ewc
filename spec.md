@@ -153,6 +153,110 @@ ewc/
     └── integration.rs # Integration tests
 ```
 
+## Future Phases
+
+### Phase 6: Longest Line Length (`-L`)
+
+Add `-L` / `--max-line-length` option to report the length of the longest line.
+
+#### Option
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--max-line-length` | `-L` | Show longest line length |
+
+#### Output
+
+```bash
+$ ewc -L file.txt
+📄 file.txt
+   Max Line:      120
+   Lines:          50
+   Words:         200
+   Bytes:       1,500
+```
+
+#### Compact Mode
+
+```bash
+$ ewc -L -C file.txt
+📄 file.txt  max:120 lines:50 words:200 bytes:1500
+```
+
+#### JSON Output
+
+```json
+{
+  "path": "file.txt",
+  "max_line_length": 120,
+  "lines": 50,
+  "words": 200,
+  "bytes": 1500
+}
+```
+
+---
+
+### Phase 7: Exclude/Include Patterns
+
+Add `--exclude` and `--include` glob patterns to filter files during directory traversal.
+
+#### Options
+
+| Option | Description |
+|--------|-------------|
+| `--exclude <PATTERN>` | Exclude files matching glob pattern (repeatable) |
+| `--include <PATTERN>` | Include only files matching glob pattern (repeatable) |
+
+#### Behavior
+
+- Patterns use glob syntax (`*`, `**`, `?`, `[...]`)
+- `--exclude` takes precedence over `--include`
+- Multiple patterns can be specified
+- Patterns apply to directory traversal only
+
+#### Examples
+
+```bash
+# Exclude test files
+$ ewc --exclude "*.test.rs" src/
+
+# Exclude multiple patterns
+$ ewc --exclude "target/*" --exclude "*.lock" .
+
+# Include only Rust files
+$ ewc --include "*.rs" src/
+
+# Combine include and exclude
+$ ewc --include "*.rs" --exclude "*_test.rs" src/
+```
+
+---
+
+### Phase 8: Parallel Processing
+
+Add parallel file processing for faster directory scanning.
+
+#### Behavior
+
+- Uses `rayon` for parallel file processing
+- Automatically parallelizes directory traversal
+- Maintains deterministic output order (sorted)
+- No change for single files or stdin
+
+#### Performance
+
+```bash
+# Large directory benefits from parallelization
+$ ewc /usr/share/
+📁 /usr/share/ (10,234 files)
+   Lines:    1,234,567
+   Words:    5,678,901
+   Bytes:  123,456,789
+```
+
+---
+
 ## License
 
 MIT
