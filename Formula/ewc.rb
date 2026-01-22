@@ -1,7 +1,7 @@
 class Ewc < Formula
   desc "Enhanced Word Count - A modern alternative to wc"
   homepage "https://github.com/tsukasaI/ewc"
-  url "https://github.com/tsukasaI/ewc/archive/refs/tags/v0.1.0.tar.gz"
+  url "https://github.com/tsukasaI/ewc/archive/refs/tags/v0.3.0.tar.gz"
   sha256 "PLACEHOLDER_SHA256"
   license "MIT"
 
