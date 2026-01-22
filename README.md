@@ -50,6 +50,25 @@ $ ewc src/*.rs
 
 ## Installation
 
+### Homebrew
+
+```bash
+brew tap tsukasaI/ewc
+brew install ewc
+```
+
+### Nix
+
+```bash
+# Run directly
+nix run github:tsukasaI/ewc
+
+# Install to profile
+nix profile install github:tsukasaI/ewc
+```
+
+### Cargo
+
 ```bash
 # From crates.io
 cargo install ewc
