@@ -18,6 +18,9 @@
             version = "0.3.0";
             src = ./.;
             cargoLock.lockFile = ./Cargo.lock;
+            # Skip integration tests in Nix sandbox (requires filesystem access)
+            # Unit tests (65 tests) still run
+            cargoTestFlags = [ "--lib" ];
 
             meta = with pkgs.lib; {
               description = "Enhanced Word Count - A modern alternative to wc";
