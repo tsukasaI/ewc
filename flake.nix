@@ -15,7 +15,7 @@
         in {
           default = pkgs.rustPlatform.buildRustPackage {
             pname = "ewc";
-            version = "0.3.0";
+            version = "0.3.1";
             src = ./.;
             cargoLock.lockFile = ./Cargo.lock;
             # Skip integration tests in Nix sandbox (requires filesystem access)

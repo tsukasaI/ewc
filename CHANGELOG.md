@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added `globset` for glob pattern matching
 - Added `rayon` for parallel processing
 
+## [0.3.1] - 2026-02-04
+
+### Fixed
+
+- Skip integration tests in Nix sandbox environment (filesystem access issues)
+
 ## [0.1.0] - 2026-01-19
 
 ### Features
