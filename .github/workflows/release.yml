@@ -75,8 +75,18 @@ jobs:
         with:
           path: artifacts
 
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          # download-artifact unpacks each file under <name>/<name>; the release
+          # publishes them flat, so normalize the checksum paths to basenames.
+          find . -type f -exec sha256sum {} \; | sed -E 's#  \./.*/#  #' > ../SHA256SUMS
+          cat ../SHA256SUMS
+
       - name: Create release
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
-          files: artifacts/**/*
+          files: |
+            artifacts/**/*
+            SHA256SUMS
           generate_release_notes: true
