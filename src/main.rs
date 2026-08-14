@@ -95,7 +95,7 @@ fn run_json_mode(args: &Args) {
         let is_directory = path.is_dir();
         results.push(JsonFileResult {
             name: file.clone(),
-            count: result.count.clone(),
+            count: result.count,
             is_directory,
             file_count: is_directory.then_some(result.file_count),
         });

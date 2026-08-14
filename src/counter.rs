@@ -12,21 +12,21 @@ pub struct FileEntry {
     pub count: Count,
 }
 
-#[derive(Debug, Default, PartialEq, Clone)]
+#[derive(Debug, Default, PartialEq, Clone, Copy)]
 pub struct Count {
-    pub lines: usize,
-    pub words: usize,
-    pub bytes: usize,
-    pub max_line_length: usize,
+    pub lines: u64,
+    pub words: u64,
+    pub bytes: u64,
+    pub max_line_length: u64,
 }
 
 impl Count {
     pub fn from_content(content: &str) -> Self {
         Self {
-            lines: content.lines().count(),
-            words: content.split_whitespace().count(),
-            bytes: content.len(),
-            max_line_length: content.lines().map(|l| l.len()).max().unwrap_or(0),
+            lines: content.lines().count() as u64,
+            words: content.split_whitespace().count() as u64,
+            bytes: content.len() as u64,
+            max_line_length: content.lines().map(|l| l.len()).max().unwrap_or(0) as u64,
         }
     }
 }
@@ -36,9 +36,9 @@ impl Add for Count {
 
     fn add(self, other: Self) -> Self {
         Self {
-            lines: self.lines + other.lines,
-            words: self.words + other.words,
-            bytes: self.bytes + other.bytes,
+            lines: self.lines.saturating_add(other.lines),
+            words: self.words.saturating_add(other.words),
+            bytes: self.bytes.saturating_add(other.bytes),
             max_line_length: self.max_line_length.max(other.max_line_length),
         }
     }
@@ -46,9 +46,9 @@ impl Add for Count {
 
 impl AddAssign for Count {
     fn add_assign(&mut self, other: Self) {
-        self.lines += other.lines;
-        self.words += other.words;
-        self.bytes += other.bytes;
+        self.lines = self.lines.saturating_add(other.lines);
+        self.words = self.words.saturating_add(other.words);
+        self.bytes = self.bytes.saturating_add(other.bytes);
         self.max_line_length = self.max_line_length.max(other.max_line_length);
     }
 }
@@ -176,7 +176,7 @@ pub fn count_directory_detailed(
     // Sort for deterministic output
     entries.sort_by(|a, b| a.path.cmp(&b.path));
 
-    let total = entries.iter().map(|e| e.count.clone()).sum();
+    let total = entries.iter().map(|e| e.count).sum();
     Ok((entries, total))
 }
 
@@ -288,6 +288,32 @@ mod tests {
         assert_eq!(total.words, 75);
         assert_eq!(total.bytes, 300);
         assert_eq!(total.max_line_length, 120); // Takes max of the two
+    }
+
+    #[test]
+    fn count_add_saturates_on_overflow() {
+        let count1 = Count {
+            lines: u64::MAX,
+            words: u64::MAX,
+            bytes: u64::MAX,
+            max_line_length: 0,
+        };
+        let count2 = Count {
+            lines: 1,
+            words: 1,
+            bytes: 1,
+            max_line_length: 0,
+        };
+        let total = count1 + count2;
+        assert_eq!(total.lines, u64::MAX);
+        assert_eq!(total.words, u64::MAX);
+        assert_eq!(total.bytes, u64::MAX);
+
+        let mut acc = count1;
+        acc += count2;
+        assert_eq!(acc.lines, u64::MAX);
+        assert_eq!(acc.words, u64::MAX);
+        assert_eq!(acc.bytes, u64::MAX);
     }
 
     fn default_config() -> FilterConfig {
