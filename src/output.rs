@@ -6,7 +6,7 @@ pub enum OutputKind {
     Directory(usize),
 }
 
-pub fn format_number(n: usize) -> String {
+pub fn format_number(n: u64) -> String {
     n.to_string()
         .as_bytes()
         .rchunks(3)
