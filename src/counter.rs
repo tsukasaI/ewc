@@ -26,7 +26,6 @@ impl Count {
         let mut words: u64 = 0;
         let mut max_line_length: u64 = 0;
         let mut current_line_len: u64 = 0;
-        let mut line_has_content = false;
         let mut in_word = false;
         // Mirrors str::lines(), which trims a lone '\r' immediately before '\n';
         // track whether the previous char was '\r' so its byte can be backed out
@@ -41,14 +40,12 @@ impl Count {
                 lines += 1;
                 max_line_length = max_line_length.max(current_line_len);
                 current_line_len = 0;
-                line_has_content = false;
                 in_word = false;
                 prev_was_cr = false;
                 continue;
             }
 
             current_line_len += ch.len_utf8() as u64;
-            line_has_content = true;
             prev_was_cr = ch == '\r';
 
             if ch.is_whitespace() {
@@ -59,7 +56,10 @@ impl Count {
             }
         }
 
-        if line_has_content {
+        // A trailing partial line (content that doesn't end in '\n') still
+        // counts, matching str::lines(); current_line_len > 0 iff such a line
+        // exists, since every non-'\n' char adds at least one byte to it.
+        if current_line_len > 0 {
             lines += 1;
             max_line_length = max_line_length.max(current_line_len);
         }
