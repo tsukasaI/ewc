@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Directory scans no longer silently drop unreadable files or subdirectories from totals — skipped entries are now reported to stderr and reflected in the exit code
 - `--json` output now escapes all control characters per RFC 8259 (previously only a handful were escaped, which could emit invalid JSON for filenames containing others)
 - `--json` mode now reports per-file failures to stderr, and always emits a well-formed JSON document even when every input fails
+- `--json` output shape is now chosen by how many arguments were given rather than how many succeeded, so e.g. two files with one failure no longer returns a different schema than two files with both failing; `--json` reading from stdin now also emits a well-formed JSON document on a read failure instead of empty stdout
 - `--max-line-length`/`-L` now counts characters, not UTF-8 bytes, so non-ASCII lines are no longer over-reported
 
 ### Changed
