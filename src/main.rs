@@ -6,6 +6,7 @@ use std::process;
 use ewc::cli::Args;
 use ewc::counter::{
     count_directory, count_directory_detailed, count_file, count_from_reader, Count, FilterConfig,
+    SkippedEntry,
 };
 use ewc::output::{
     format_compact_output, format_compact_total, format_json_multiple, format_json_single,
@@ -18,19 +19,35 @@ const WARNING_ICON: &str = "\u{26A0}\u{FE0F}";
 struct ProcessResult {
     count: Count,
     file_count: usize,
+    skipped: Vec<SkippedEntry>,
 }
 
 fn process_path(path: &Path, config: &FilterConfig) -> io::Result<ProcessResult> {
     if path.is_dir() {
-        let (count, file_count) = count_directory(path, config)?;
-        Ok(ProcessResult { count, file_count })
+        let (count, file_count, skipped) = count_directory(path, config)?;
+        Ok(ProcessResult {
+            count,
+            file_count,
+            skipped,
+        })
     } else {
         let count = count_file(path)?;
         Ok(ProcessResult {
             count,
             file_count: 1,
+            skipped: Vec::new(),
         })
     }
+}
+
+/// Prints one warning line per skipped entry, matching the existing
+/// top-level-failure style. Returns whether anything was skipped, so callers
+/// can fold it into the process's exit code.
+fn report_skipped(skipped: &[SkippedEntry]) -> bool {
+    for entry in skipped {
+        eprintln!("{WARNING_ICON}  {}: {}", entry.path.display(), entry.error);
+    }
+    !skipped.is_empty()
 }
 
 fn create_filter_config(args: &Args) -> FilterConfig {
@@ -92,6 +109,10 @@ fn run_json_mode(args: &Args) {
             continue;
         };
 
+        if report_skipped(&result.skipped) {
+            has_error = true;
+        }
+
         let is_directory = path.is_dir();
         results.push(JsonFileResult {
             name: file.clone(),
@@ -127,8 +148,12 @@ fn run_normal_mode(args: &Args) {
 
         if path.is_dir() && args.verbose {
             match count_directory_detailed(path, &config) {
-                Ok((entries, dir_total)) => {
+                Ok((entries, dir_total, skipped)) => {
                     println!("{}", format_verbose_output(&entries, &dir_total, args));
+
+                    if report_skipped(&skipped) {
+                        has_error = true;
+                    }
 
                     total_count += dir_total;
                     total_file_count += entries.len();
@@ -157,6 +182,10 @@ fn run_normal_mode(args: &Args) {
                         format_output(file, &result.count, kind, args)
                     };
                     println!("{output}");
+
+                    if report_skipped(&result.skipped) {
+                        has_error = true;
+                    }
 
                     total_count += result.count;
                     total_file_count += result.file_count;

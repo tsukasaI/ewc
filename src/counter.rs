@@ -12,6 +12,14 @@ pub struct FileEntry {
     pub count: Count,
 }
 
+/// A directory-scan entry (a walked path, or a file within it) that could
+/// not be counted — permission denied, vanished mid-walk, or any other I/O
+/// failure — along with the error that caused it to be skipped.
+pub struct SkippedEntry {
+    pub path: PathBuf,
+    pub error: String,
+}
+
 #[derive(Debug, Default, PartialEq, Clone, Copy)]
 pub struct Count {
     pub lines: u64,
@@ -206,62 +214,111 @@ fn matches_glob(glob_set: &GlobSet, relative_path: &Path) -> bool {
     glob_set.is_match(&*path_str) || glob_set.is_match(relative_path)
 }
 
-fn walk_directory(path: &Path, config: &FilterConfig) -> io::Result<Vec<PathBuf>> {
+// Symlinks inside a scanned directory are intentionally not followed:
+// walkdir does not follow them by default, and this matches classic `wc`'s
+// behavior of only counting regular files it walks into directly.
+fn walk_directory(
+    path: &Path,
+    config: &FilterConfig,
+) -> io::Result<(Vec<PathBuf>, Vec<SkippedEntry>)> {
     let exclude_set = FilterConfig::build_globset(&config.exclude_patterns)?;
     let include_set = FilterConfig::build_globset(&config.include_patterns)?;
     let has_include_patterns = !config.include_patterns.is_empty();
 
-    let entries = WalkDir::new(path)
+    let mut entries = Vec::new();
+    let mut skipped = Vec::new();
+
+    for entry in WalkDir::new(path)
         .into_iter()
         .filter_entry(|e| e.depth() == 0 || config.include_hidden || !is_hidden(e))
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-        .filter_map(|entry| {
-            let file_path = entry.path();
-            let relative_path = file_path.strip_prefix(path).unwrap_or(file_path);
-
-            if matches_glob(&exclude_set, relative_path) {
-                return None;
+    {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(e) => {
+                let entry_path = e
+                    .path()
+                    .map_or_else(|| path.to_path_buf(), Path::to_path_buf);
+                // walkdir::Error's Display already includes the path when one
+                // is available ("IO error for operation on {path}: {err}"),
+                // so fall back to the inner io::Error's message to avoid
+                // printing the path twice in the reported warning line.
+                let error = e
+                    .io_error()
+                    .map_or_else(|| e.to_string(), ToString::to_string);
+                skipped.push(SkippedEntry {
+                    path: entry_path,
+                    error,
+                });
+                continue;
             }
+        };
 
-            if has_include_patterns && !matches_glob(&include_set, relative_path) {
-                return None;
-            }
+        if !entry.file_type().is_file() {
+            continue;
+        }
 
-            Some(file_path.to_path_buf())
-        })
-        .collect();
+        let file_path = entry.path();
+        let relative_path = file_path.strip_prefix(path).unwrap_or(file_path);
 
-    Ok(entries)
+        if matches_glob(&exclude_set, relative_path) {
+            continue;
+        }
+        if has_include_patterns && !matches_glob(&include_set, relative_path) {
+            continue;
+        }
+
+        entries.push(file_path.to_path_buf());
+    }
+
+    Ok((entries, skipped))
 }
 
-pub fn count_directory(path: &Path, config: &FilterConfig) -> io::Result<(Count, usize)> {
-    let (entries, total) = count_directory_detailed(path, config)?;
-    Ok((total, entries.len()))
+pub fn count_directory(
+    path: &Path,
+    config: &FilterConfig,
+) -> io::Result<(Count, usize, Vec<SkippedEntry>)> {
+    let (entries, total, skipped) = count_directory_detailed(path, config)?;
+    Ok((total, entries.len(), skipped))
 }
 
 pub fn count_directory_detailed(
     path: &Path,
     config: &FilterConfig,
-) -> io::Result<(Vec<FileEntry>, Count)> {
-    let file_paths = walk_directory(path, config)?;
+) -> io::Result<(Vec<FileEntry>, Count, Vec<SkippedEntry>)> {
+    let (file_paths, mut skipped) = walk_directory(path, config)?;
 
-    // Parallel file counting with rayon
-    let mut entries: Vec<FileEntry> = file_paths
+    // Parallel file counting with rayon; failures are collected rather than
+    // dropped so directory totals are never silently short (#11).
+    let results: Vec<Result<FileEntry, SkippedEntry>> = file_paths
         .par_iter()
-        .filter_map(|file_path| {
-            count_file(file_path).ok().map(|count| FileEntry {
-                path: file_path.clone(),
-                count,
-            })
+        .map(|file_path| {
+            count_file(file_path)
+                .map(|count| FileEntry {
+                    path: file_path.clone(),
+                    count,
+                })
+                .map_err(|e| SkippedEntry {
+                    path: file_path.clone(),
+                    error: e.to_string(),
+                })
         })
         .collect();
 
-    // Sort for deterministic output
+    let mut entries = Vec::with_capacity(results.len());
+    for result in results {
+        match result {
+            Ok(entry) => entries.push(entry),
+            Err(entry) => skipped.push(entry),
+        }
+    }
+
+    // Sort for deterministic output; walk order is OS-dependent, and the
+    // rayon phase above preserves the (already-walked) file_paths order.
     entries.sort_by(|a, b| a.path.cmp(&b.path));
+    skipped.sort_by(|a, b| a.path.cmp(&b.path));
 
     let total = entries.iter().map(|e| e.count).sum();
-    Ok((entries, total))
+    Ok((entries, total, skipped))
 }
 
 #[cfg(test)]
@@ -497,10 +554,105 @@ mod tests {
 
         let result = count_directory(dir.path(), &default_config());
         assert!(result.is_ok());
-        let (count, file_count) = result.unwrap();
+        let (count, file_count, skipped) = result.unwrap();
+        assert!(skipped.is_empty());
         assert_eq!(file_count, 1);
         assert_eq!(count.lines, 1);
         assert_eq!(count.words, 2);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn count_directory_reports_unreadable_file_as_skipped() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+
+        let readable = dir.path().join("readable.txt");
+        let mut f = std::fs::File::create(&readable).unwrap();
+        writeln!(f, "hello world").unwrap();
+
+        let unreadable = dir.path().join("unreadable.txt");
+        std::fs::write(&unreadable, "secret").unwrap();
+        std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let result = count_directory(dir.path(), &default_config());
+        // Not required for tempdir cleanup (unlinking only needs write access
+        // to the parent directory), but restoring is good hygiene regardless.
+        let restore = || {
+            let _ = std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o644));
+        };
+
+        let (count, file_count, skipped) = match result {
+            Ok(v) => v,
+            Err(e) => {
+                restore();
+                panic!("count_directory failed: {e}");
+            }
+        };
+        restore();
+
+        // Running as root (some CI/sandbox environments) bypasses permission
+        // checks entirely, in which case there's nothing to assert here.
+        if skipped.is_empty() && file_count == 2 {
+            return;
+        }
+
+        assert_eq!(file_count, 1);
+        assert_eq!(count.lines, 1);
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].path, unreadable);
+        assert!(!skipped[0].error.is_empty());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn count_directory_reports_unreadable_subdirectory_as_skipped() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+
+        let readable = dir.path().join("readable.txt");
+        let mut f = std::fs::File::create(&readable).unwrap();
+        writeln!(f, "hello world").unwrap();
+
+        // Without the execute bit, walkdir cannot read_dir into this
+        // subdirectory at all — this exercises the walk-phase error path
+        // (layer 1), distinct from a per-file read failure (layer 2), which
+        // count_directory_reports_unreadable_file_as_skipped covers.
+        let locked_subdir = dir.path().join("locked");
+        std::fs::create_dir(&locked_subdir).unwrap();
+        std::fs::write(locked_subdir.join("inside.txt"), "unreachable").unwrap();
+        std::fs::set_permissions(&locked_subdir, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let result = count_directory(dir.path(), &default_config());
+        let restore = || {
+            let _ =
+                std::fs::set_permissions(&locked_subdir, std::fs::Permissions::from_mode(0o755));
+        };
+
+        let (count, file_count, skipped) = match result {
+            Ok(v) => v,
+            Err(e) => {
+                restore();
+                panic!("count_directory failed: {e}");
+            }
+        };
+        restore();
+
+        // Running as root (some CI/sandbox environments) bypasses permission
+        // checks entirely, in which case there's nothing to assert here.
+        if skipped.is_empty() && file_count == 2 {
+            return;
+        }
+
+        assert_eq!(file_count, 1);
+        assert_eq!(count.lines, 1);
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].path, locked_subdir);
+        assert!(!skipped[0].error.is_empty());
     }
 
     #[test]
@@ -518,7 +670,8 @@ mod tests {
 
         let result = count_directory(dir.path(), &default_config());
         assert!(result.is_ok());
-        let (count, file_count) = result.unwrap();
+        let (count, file_count, skipped) = result.unwrap();
+        assert!(skipped.is_empty());
         assert_eq!(file_count, 2);
         assert_eq!(count.lines, 2);
         assert_eq!(count.words, 2);
@@ -543,7 +696,8 @@ mod tests {
 
         let result = count_directory(dir.path(), &default_config());
         assert!(result.is_ok());
-        let (count, file_count) = result.unwrap();
+        let (count, file_count, skipped) = result.unwrap();
+        assert!(skipped.is_empty());
         assert_eq!(file_count, 2);
         assert_eq!(count.lines, 2);
         assert_eq!(count.words, 3); // "root" + "nested file"
@@ -566,7 +720,8 @@ mod tests {
 
         let result = count_directory(dir.path(), &default_config());
         assert!(result.is_ok());
-        let (count, file_count) = result.unwrap();
+        let (count, file_count, skipped) = result.unwrap();
+        assert!(skipped.is_empty());
         assert_eq!(file_count, 1); // Only visible file
         assert_eq!(count.words, 1); // Only "visible"
     }
@@ -590,7 +745,8 @@ mod tests {
 
         let result = count_directory(dir.path(), &default_config());
         assert!(result.is_ok());
-        let (count, file_count) = result.unwrap();
+        let (count, file_count, skipped) = result.unwrap();
+        assert!(skipped.is_empty());
         assert_eq!(file_count, 1); // Only visible file
         assert_eq!(count.words, 1); // Only "visible"
     }
@@ -612,7 +768,8 @@ mod tests {
 
         let result = count_directory(dir.path(), &config_with_hidden());
         assert!(result.is_ok());
-        let (count, file_count) = result.unwrap();
+        let (count, file_count, skipped) = result.unwrap();
+        assert!(skipped.is_empty());
         assert_eq!(file_count, 2); // Both files
         assert_eq!(count.words, 2); // "visible" + "hidden"
     }
@@ -636,7 +793,8 @@ mod tests {
 
         let result = count_directory(dir.path(), &config_with_hidden());
         assert!(result.is_ok());
-        let (count, file_count) = result.unwrap();
+        let (count, file_count, skipped) = result.unwrap();
+        assert!(skipped.is_empty());
         assert_eq!(file_count, 2); // Both files
         assert_eq!(count.words, 4); // "visible" + "nested in hidden"
     }
@@ -656,7 +814,8 @@ mod tests {
 
         let result = count_directory_detailed(dir.path(), &default_config());
         assert!(result.is_ok());
-        let (entries, total) = result.unwrap();
+        let (entries, total, skipped) = result.unwrap();
+        assert!(skipped.is_empty());
 
         assert_eq!(entries.len(), 2);
         assert_eq!(total.lines, 2);
@@ -674,7 +833,7 @@ mod tests {
 
         let result = count_directory_detailed(dir.path(), &default_config());
         assert!(result.is_ok());
-        let (entries, _) = result.unwrap();
+        let (entries, _, _) = result.unwrap();
 
         // Should be sorted alphabetically
         assert!(entries[0].path.to_string_lossy().contains("a_file"));
@@ -694,7 +853,8 @@ mod tests {
         let config = FilterConfig::new(false, vec!["*.md".to_string()], vec![]);
         let result = count_directory(dir.path(), &config);
         assert!(result.is_ok());
-        let (count, file_count) = result.unwrap();
+        let (count, file_count, skipped) = result.unwrap();
+        assert!(skipped.is_empty());
         assert_eq!(file_count, 2); // .rs and .txt only
         assert_eq!(count.words, 3); // "rust code" + "text"
     }
@@ -710,7 +870,8 @@ mod tests {
         let config = FilterConfig::new(false, vec![], vec!["*.rs".to_string()]);
         let result = count_directory(dir.path(), &config);
         assert!(result.is_ok());
-        let (count, file_count) = result.unwrap();
+        let (count, file_count, skipped) = result.unwrap();
+        assert!(skipped.is_empty());
         assert_eq!(file_count, 1); // .rs only
         assert_eq!(count.words, 2); // "rust code"
     }
@@ -732,7 +893,8 @@ mod tests {
         );
         let result = count_directory(dir.path(), &config);
         assert!(result.is_ok());
-        let (count, file_count) = result.unwrap();
+        let (count, file_count, skipped) = result.unwrap();
+        assert!(skipped.is_empty());
         assert_eq!(file_count, 2); // main.rs and lib.rs only
         assert_eq!(count.words, 2); // "main" + "lib"
     }
@@ -750,7 +912,8 @@ mod tests {
         let config = FilterConfig::new(false, vec!["target/*".to_string()], vec![]);
         let result = count_directory(dir.path(), &config);
         assert!(result.is_ok());
-        let (count, file_count) = result.unwrap();
+        let (count, file_count, skipped) = result.unwrap();
+        assert!(skipped.is_empty());
         assert_eq!(file_count, 1); // Only root.txt
         assert_eq!(count.words, 1); // "root"
     }
@@ -771,7 +934,8 @@ mod tests {
         );
         let result = count_directory(dir.path(), &config);
         assert!(result.is_ok());
-        let (count, file_count) = result.unwrap();
+        let (count, file_count, skipped) = result.unwrap();
+        assert!(skipped.is_empty());
         assert_eq!(file_count, 2); // .rs and .txt only
         assert_eq!(count.words, 2); // "rust" + "text"
     }
