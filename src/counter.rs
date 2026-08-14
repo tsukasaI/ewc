@@ -22,53 +22,74 @@ pub struct Count {
 
 impl Count {
     pub fn from_content(content: &str) -> Self {
-        let mut lines: u64 = 0;
-        let mut words: u64 = 0;
-        let mut max_line_length: u64 = 0;
-        let mut current_line_len: u64 = 0;
-        let mut in_word = false;
-        // Mirrors str::lines(), which trims a lone '\r' immediately before '\n';
-        // track whether the previous char was '\r' so its byte can be backed out
-        // of the line length once we know a following '\n' makes it a CRLF pair.
-        let mut prev_was_cr = false;
+        let mut acc = CountAccumulator::default();
+        acc.write(content.as_bytes());
+        acc.finish()
+    }
+}
 
-        for ch in content.chars() {
-            if ch == '\n' {
-                if prev_was_cr {
-                    current_line_len -= 1;
+// Counts lines/words/bytes/max-line-length over raw bytes rather than `char`s,
+// so it works on arbitrary (non-UTF-8) input the same way `wc` does, and can
+// fold a file in fixed-size chunks without ever buffering it whole (#5, #10).
+// Word boundaries use ASCII whitespace rather than char::is_whitespace()'s
+// full Unicode set, since byte-level input has no notion of a Unicode scalar.
+#[derive(Default)]
+struct CountAccumulator {
+    lines: u64,
+    words: u64,
+    bytes: u64,
+    max_line_length: u64,
+    current_line_len: u64,
+    in_word: bool,
+    // Mirrors str::lines(), which trims a lone '\r' immediately before '\n';
+    // track whether the previous byte was '\r' so it can be backed out of the
+    // line length once a following '\n' confirms the CRLF pair.
+    prev_was_cr: bool,
+}
+
+impl CountAccumulator {
+    fn write(&mut self, chunk: &[u8]) {
+        self.bytes += chunk.len() as u64;
+
+        for &b in chunk {
+            if b == b'\n' {
+                if self.prev_was_cr {
+                    self.current_line_len -= 1;
                 }
-                lines += 1;
-                max_line_length = max_line_length.max(current_line_len);
-                current_line_len = 0;
-                in_word = false;
-                prev_was_cr = false;
+                self.lines += 1;
+                self.max_line_length = self.max_line_length.max(self.current_line_len);
+                self.current_line_len = 0;
+                self.in_word = false;
+                self.prev_was_cr = false;
                 continue;
             }
 
-            current_line_len += ch.len_utf8() as u64;
-            prev_was_cr = ch == '\r';
+            self.current_line_len += 1;
+            self.prev_was_cr = b == b'\r';
 
-            if ch.is_whitespace() {
-                in_word = false;
-            } else if !in_word {
-                in_word = true;
-                words += 1;
+            if b.is_ascii_whitespace() {
+                self.in_word = false;
+            } else if !self.in_word {
+                self.in_word = true;
+                self.words += 1;
             }
         }
+    }
 
+    fn finish(mut self) -> Count {
         // A trailing partial line (content that doesn't end in '\n') still
         // counts, matching str::lines(); current_line_len > 0 iff such a line
-        // exists, since every non-'\n' char adds at least one byte to it.
-        if current_line_len > 0 {
-            lines += 1;
-            max_line_length = max_line_length.max(current_line_len);
+        // exists, since every non-'\n' byte adds at least one to it.
+        if self.current_line_len > 0 {
+            self.lines += 1;
+            self.max_line_length = self.max_line_length.max(self.current_line_len);
         }
 
-        Self {
-            lines,
-            words,
-            bytes: content.len() as u64,
-            max_line_length,
+        Count {
+            lines: self.lines,
+            words: self.words,
+            bytes: self.bytes,
+            max_line_length: self.max_line_length,
         }
     }
 }
@@ -141,15 +162,26 @@ impl FilterConfig {
     }
 }
 
+const READ_CHUNK_SIZE: usize = 64 * 1024;
+
 pub fn count_file(path: &Path) -> io::Result<Count> {
-    let content = fs::read_to_string(path)?;
-    Ok(Count::from_content(&content))
+    let file = fs::File::open(path)?;
+    count_from_reader(file)
 }
 
 pub fn count_from_reader<R: Read>(mut reader: R) -> io::Result<Count> {
-    let mut content = String::new();
-    reader.read_to_string(&mut content)?;
-    Ok(Count::from_content(&content))
+    let mut acc = CountAccumulator::default();
+    let mut buf = [0u8; READ_CHUNK_SIZE];
+
+    loop {
+        let n = reader.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        acc.write(&buf[..n]);
+    }
+
+    Ok(acc.finish())
 }
 
 fn is_hidden(entry: &walkdir::DirEntry) -> bool {
@@ -294,6 +326,50 @@ mod tests {
     fn count_file_not_found() {
         let result = count_file(Path::new("nonexistent_file.txt"));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn count_file_non_utf8_succeeds() {
+        use std::io::Write;
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        // 0xFF is not a valid UTF-8 lead or continuation byte anywhere.
+        file.write_all(b"hello\xFF\xFEworld\n").unwrap();
+
+        let count = count_file(file.path()).unwrap();
+        assert_eq!(count.lines, 1);
+        assert_eq!(count.bytes, b"hello\xFF\xFEworld\n".len() as u64);
+    }
+
+    #[test]
+    fn count_from_reader_non_utf8_succeeds() {
+        let data: &[u8] = b"foo\xFFbar baz\n";
+        let count = count_from_reader(data).unwrap();
+        assert_eq!(count.lines, 1);
+        assert_eq!(count.words, 2);
+        assert_eq!(count.bytes, data.len() as u64);
+    }
+
+    #[test]
+    fn count_accumulator_matches_across_chunk_boundaries() {
+        // Split a CRLF pair and a word across separate write() calls to
+        // simulate content spanning a chunked-read boundary; state carried
+        // in the accumulator must still produce the same result as one
+        // single write() of the whole content.
+        let content = "hello wor\r\nld\nfoo bar";
+        let whole = Count::from_content(content);
+
+        let mut acc = CountAccumulator::default();
+        for chunk in [
+            b"hello wor".as_slice(),
+            b"\r".as_slice(),
+            b"\nld\nfoo ".as_slice(),
+            b"bar".as_slice(),
+        ] {
+            acc.write(chunk);
+        }
+        let chunked = acc.finish();
+
+        assert_eq!(chunked, whole);
     }
 
     #[test]

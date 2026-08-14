@@ -7,6 +7,12 @@ fn create_test_file(content: &str) -> tempfile::NamedTempFile {
     file
 }
 
+fn create_test_file_bytes(content: &[u8]) -> tempfile::NamedTempFile {
+    let mut file = tempfile::NamedTempFile::new().unwrap();
+    file.write_all(content).unwrap();
+    file
+}
+
 struct CommandResult {
     stdout: String,
     stderr: String,
@@ -522,4 +528,33 @@ fn directory_and_nonexistent_file() {
     assert!(!result.success);
     assert!(result.stderr.contains("nonexistent.txt"));
     assert!(result.stdout.contains("📁"));
+}
+
+#[test]
+fn non_utf8_file_counts_instead_of_erroring() {
+    let file = create_test_file_bytes(b"hello\xFF\xFEworld\n");
+    let result = run_ewc(&[file.path().to_str().unwrap()]);
+
+    assert!(result.success);
+    assert!(result.stdout.contains("Lines:"));
+    assert!(result.stdout.contains("1"));
+}
+
+#[test]
+fn stdin_non_utf8_input_counts_instead_of_erroring() {
+    let output = Command::new("./target/debug/ewc")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write as _;
+            child.stdin.take().unwrap().write_all(b"foo\xFFbar baz\n")?;
+            child.wait_with_output()
+        })
+        .expect("failed to run ewc with binary stdin");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Lines:"));
 }
