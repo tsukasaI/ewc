@@ -22,11 +22,53 @@ pub struct Count {
 
 impl Count {
     pub fn from_content(content: &str) -> Self {
+        let mut lines: u64 = 0;
+        let mut words: u64 = 0;
+        let mut max_line_length: u64 = 0;
+        let mut current_line_len: u64 = 0;
+        let mut in_word = false;
+        // Mirrors str::lines(), which trims a lone '\r' immediately before '\n';
+        // track whether the previous char was '\r' so its byte can be backed out
+        // of the line length once we know a following '\n' makes it a CRLF pair.
+        let mut prev_was_cr = false;
+
+        for ch in content.chars() {
+            if ch == '\n' {
+                if prev_was_cr {
+                    current_line_len -= 1;
+                }
+                lines += 1;
+                max_line_length = max_line_length.max(current_line_len);
+                current_line_len = 0;
+                in_word = false;
+                prev_was_cr = false;
+                continue;
+            }
+
+            current_line_len += ch.len_utf8() as u64;
+            prev_was_cr = ch == '\r';
+
+            if ch.is_whitespace() {
+                in_word = false;
+            } else if !in_word {
+                in_word = true;
+                words += 1;
+            }
+        }
+
+        // A trailing partial line (content that doesn't end in '\n') still
+        // counts, matching str::lines(); current_line_len > 0 iff such a line
+        // exists, since every non-'\n' char adds at least one byte to it.
+        if current_line_len > 0 {
+            lines += 1;
+            max_line_length = max_line_length.max(current_line_len);
+        }
+
         Self {
-            lines: content.lines().count() as u64,
-            words: content.split_whitespace().count() as u64,
+            lines,
+            words,
             bytes: content.len() as u64,
-            max_line_length: content.lines().map(|l| l.len()).max().unwrap_or(0) as u64,
+            max_line_length,
         }
     }
 }
@@ -267,6 +309,28 @@ mod tests {
     fn count_max_line_length_varies() {
         let count = Count::from_content("short\nlonger line here\nmed");
         assert_eq!(count.max_line_length, 16); // "longer line here"
+    }
+
+    #[test]
+    fn count_crlf_line_endings() {
+        // The trailing '\r' of a CRLF pair must not count toward line length,
+        // matching str::lines() semantics.
+        let count = Count::from_content("ab\r\nc\r\n");
+        assert_eq!(count.lines, 2);
+        assert_eq!(count.words, 2);
+        assert_eq!(count.bytes, 7);
+        assert_eq!(count.max_line_length, 2); // "ab", not "ab\r"
+    }
+
+    #[test]
+    fn count_lone_carriage_return_is_whitespace_not_newline() {
+        // A '\r' not followed by '\n' stays on the same line (str::lines()
+        // only splits on '\n'/'\r\n'), but split_whitespace() still treats
+        // it as a word separator.
+        let count = Count::from_content("foo\rbar");
+        assert_eq!(count.lines, 1);
+        assert_eq!(count.words, 2);
+        assert_eq!(count.max_line_length, 7);
     }
 
     #[test]
