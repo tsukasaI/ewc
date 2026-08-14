@@ -549,6 +549,16 @@ fn directory_and_nonexistent_file() {
 }
 
 #[test]
+fn max_line_length_counts_multibyte_chars_not_bytes() {
+    // 10 Japanese characters: 30 bytes in UTF-8, but 10 characters.
+    let file = create_test_file(&"あ".repeat(10));
+    let result = run_ewc(&["-L", "--json", file.path().to_str().unwrap()]);
+
+    assert!(result.success);
+    assert!(result.stdout.contains("\"max_line_length\":10"));
+}
+
+#[test]
 fn non_utf8_file_counts_instead_of_erroring() {
     let file = create_test_file_bytes(b"hello\xFF\xFEworld\n");
     let result = run_ewc(&["--json", file.path().to_str().unwrap()]);

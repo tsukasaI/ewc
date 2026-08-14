@@ -23,7 +23,7 @@ pub struct Args {
     #[arg(short = 'c', long)]
     pub bytes: bool,
 
-    /// Show longest line length
+    /// Show longest line length, in characters (not bytes)
     #[arg(short = 'L', long)]
     pub max_line_length: bool,
 

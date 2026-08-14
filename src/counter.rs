@@ -36,20 +36,34 @@ impl Count {
     }
 }
 
-// Counts lines/words/bytes/max-line-length over raw bytes rather than `char`s,
-// so it works on arbitrary (non-UTF-8) input the same way `wc` does, and can
-// fold a file in fixed-size chunks without ever buffering it whole (#5, #10).
-// Word boundaries use POSIX isspace()'s ASCII whitespace set rather than
+// Counts lines/words/bytes over raw bytes rather than `char`s, so it works
+// on arbitrary (non-UTF-8) input the same way `wc` does, and can fold a file
+// in fixed-size chunks without ever buffering it whole (#5, #10). Word
+// boundaries use POSIX isspace()'s ASCII whitespace set rather than
 // char::is_whitespace()'s full Unicode set, since byte-level input has no
 // notion of a Unicode scalar; multi-byte Unicode whitespace (e.g. U+3000,
 // U+00A0) no longer splits words as a result — see README.
+//
+// max_line_length is the one metric measured in Unicode scalars rather than
+// bytes (#15): a line of 10 Japanese characters should report 10, not the
+// ~30 bytes their UTF-8 encoding takes. current_line_chars counts every byte
+// that is NOT a UTF-8 continuation byte (top two bits `10`) — for valid
+// UTF-8 this is exactly the scalar count, since every encoded character has
+// exactly one leading (non-continuation) byte; this needs no decoding, no
+// cross-chunk buffering, and degrades gracefully on malformed input (each
+// byte either starts or extends a "character") rather than requiring full
+// UTF-8 validation in a streaming, binary-safe counter.
 #[derive(Default)]
 struct CountAccumulator {
     lines: u64,
     words: u64,
     bytes: u64,
     max_line_length: u64,
-    current_line_len: u64,
+    current_line_chars: u64,
+    // current_line_chars alone can't tell "no bytes on this line" from "only
+    // stray UTF-8 continuation bytes on this line" (both count as 0), so the
+    // trailing-partial-line check in finish() needs this instead.
+    line_has_content: bool,
     in_word: bool,
     // Mirrors str::lines(), which trims a lone '\r' immediately before '\n';
     // track whether the previous byte was '\r' so it can be backed out of the
@@ -64,17 +78,21 @@ impl CountAccumulator {
         for &b in chunk {
             if b == b'\n' {
                 if self.prev_was_cr {
-                    self.current_line_len -= 1;
+                    self.current_line_chars -= 1;
                 }
                 self.lines += 1;
-                self.max_line_length = self.max_line_length.max(self.current_line_len);
-                self.current_line_len = 0;
+                self.max_line_length = self.max_line_length.max(self.current_line_chars);
+                self.current_line_chars = 0;
+                self.line_has_content = false;
                 self.in_word = false;
                 self.prev_was_cr = false;
                 continue;
             }
 
-            self.current_line_len += 1;
+            self.line_has_content = true;
+            if b & 0b1100_0000 != 0b1000_0000 {
+                self.current_line_chars += 1;
+            }
             self.prev_was_cr = b == b'\r';
 
             // POSIX isspace(), not u8::is_ascii_whitespace(): the latter
@@ -91,11 +109,10 @@ impl CountAccumulator {
 
     fn finish(mut self) -> Count {
         // A trailing partial line (content that doesn't end in '\n') still
-        // counts, matching str::lines(); current_line_len > 0 iff such a line
-        // exists, since every non-'\n' byte adds at least one to it.
-        if self.current_line_len > 0 {
+        // counts, matching str::lines().
+        if self.line_has_content {
             self.lines += 1;
-            self.max_line_length = self.max_line_length.max(self.current_line_len);
+            self.max_line_length = self.max_line_length.max(self.current_line_chars);
         }
 
         Count {
@@ -421,7 +438,7 @@ mod tests {
         // Split a CRLF pair and a single word ("bar" -> "ba" | "r", with no
         // whitespace at the split point) across separate write() calls to
         // simulate content spanning a chunked-read boundary; state carried
-        // in the accumulator (current_line_len, prev_was_cr, and crucially
+        // in the accumulator (current_line_chars, prev_was_cr, and crucially
         // in_word, which a per-write reset wouldn't need for the other two
         // splits) must still produce the same result as one single write()
         // of the whole content.
@@ -456,6 +473,44 @@ mod tests {
     fn count_max_line_length_varies() {
         let count = Count::from_content("short\nlonger line here\nmed");
         assert_eq!(count.max_line_length, 16); // "longer line here"
+    }
+
+    #[test]
+    fn count_max_line_length_counts_multibyte_chars_not_bytes() {
+        // 10 Japanese characters, 30 bytes in UTF-8 — max_line_length must
+        // report 10 (chars), not 30 (bytes).
+        let line = "あ".repeat(10);
+        assert_eq!(line.len(), 30);
+        let count = Count::from_content(&line);
+        assert_eq!(count.max_line_length, 10);
+    }
+
+    #[test]
+    fn count_max_line_length_mixed_ascii_and_multibyte() {
+        // "café" = c,a,f,é -> 4 chars, but é is 2 bytes -> 5 bytes.
+        let count = Count::from_content("café\nhi");
+        assert_eq!(count.max_line_length, 4);
+        assert_eq!(count.bytes, 8); // "café\nhi" = 5 + 1 + 2 bytes
+    }
+
+    #[test]
+    fn count_accumulator_multibyte_char_split_across_chunk_boundary() {
+        // "あ" is E3 81 82; split leading bytes from their continuation
+        // bytes across four write() calls to confirm the continuation-byte
+        // classification (and thus the char count) is unaffected by where
+        // a chunked read happens to cut a multi-byte sequence.
+        let content = "あああ"; // 3 chars, 9 bytes
+        let whole = Count::from_content(content);
+        assert_eq!(whole.max_line_length, 3);
+
+        let bytes = content.as_bytes();
+        let mut acc = CountAccumulator::default();
+        for chunk in [&bytes[0..1], &bytes[1..4], &bytes[4..6], &bytes[6..9]] {
+            acc.write(chunk);
+        }
+        let chunked = acc.finish();
+
+        assert_eq!(chunked, whole);
     }
 
     #[test]

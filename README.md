@@ -90,7 +90,7 @@ ewc [OPTIONS] [FILE]...
 | `--lines` | `-l` | Show line count only |
 | `--words` | `-w` | Show word count only |
 | `--bytes` | `-c` | Show byte count only |
-| `--max-line-length` | `-L` | Show longest line length |
+| `--max-line-length` | `-L` | Show longest line length, in characters (not bytes) |
 | `--verbose` | `-v` | Show file list (directories) |
 | `--all` | `-a` | Include hidden files |
 | `--compact` | `-C` | Single-line output |
