@@ -539,6 +539,51 @@ fn json_mode_all_inputs_failing_prints_valid_json_and_reports_errors() {
 }
 
 #[test]
+fn json_mode_two_args_one_success_uses_multi_file_envelope_shape() {
+    // A consumer passing N (>1) arguments must always get the {files,
+    // total} envelope shape, regardless of how many of them succeeded —
+    // not a bare single-object shape just because only one call happened
+    // to succeed (#27).
+    let file1 = create_test_file("hello\n");
+    let result = run_ewc(&["--json", file1.path().to_str().unwrap(), "nonexistent.txt"]);
+
+    assert!(!result.success);
+    let parsed: serde_json::Value =
+        serde_json::from_str(result.stdout.trim()).expect("stdout must be valid JSON");
+    assert!(
+        parsed.get("files").is_some(),
+        "expected envelope shape with a 'files' key, got: {parsed}"
+    );
+    assert_eq!(parsed["total"]["file_count"], 1);
+}
+
+#[test]
+#[cfg(unix)]
+fn stdin_json_mode_read_failure_prints_valid_json() {
+    // Reading from a directory fails at the OS level (EISDIR) even though
+    // opening it succeeds, giving a real stdin read error to test against
+    // — a read failure in --json mode must not leave stdout empty, matching
+    // the file-argument path's behavior on total failure (#27).
+    let dir = tempfile::tempdir().unwrap();
+    let dir_as_stdin = std::fs::File::open(dir.path()).expect("directories can be opened");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_ewc"))
+        .args(["--json"])
+        .stdin(std::process::Stdio::from(dir_as_stdin))
+        .output()
+        .expect("failed to run ewc");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("<stdin>"));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
+    assert_eq!(parsed["files"], serde_json::json!([]));
+    assert_eq!(parsed["total"]["file_count"], 0);
+}
+
+#[test]
 fn directory_and_nonexistent_file() {
     let dir = create_test_dir();
     let result = run_ewc(&[dir.path().to_str().unwrap(), "nonexistent.txt"]);
