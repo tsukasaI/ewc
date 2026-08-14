@@ -567,13 +567,15 @@ fn stdin_json_mode_read_failure_prints_valid_json() {
     let dir = tempfile::tempdir().unwrap();
     let dir_as_stdin = std::fs::File::open(dir.path()).expect("directories can be opened");
 
-    let output = Command::new("./target/debug/ewc")
+    let output = Command::new(env!("CARGO_BIN_EXE_ewc"))
         .args(["--json"])
         .stdin(std::process::Stdio::from(dir_as_stdin))
         .output()
         .expect("failed to run ewc");
 
     assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("<stdin>"));
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value =
         serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
