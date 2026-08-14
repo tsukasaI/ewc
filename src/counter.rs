@@ -438,7 +438,7 @@ mod tests {
         // Split a CRLF pair and a single word ("bar" -> "ba" | "r", with no
         // whitespace at the split point) across separate write() calls to
         // simulate content spanning a chunked-read boundary; state carried
-        // in the accumulator (current_line_len, prev_was_cr, and crucially
+        // in the accumulator (current_line_chars, prev_was_cr, and crucially
         // in_word, which a per-write reset wouldn't need for the other two
         // splits) must still produce the same result as one single write()
         // of the whole content.
@@ -495,8 +495,8 @@ mod tests {
 
     #[test]
     fn count_accumulator_multibyte_char_split_across_chunk_boundary() {
-        // "あ" is E3 81 82; split the leading byte from its continuation
-        // bytes across two write() calls to confirm the continuation-byte
+        // "あ" is E3 81 82; split leading bytes from their continuation
+        // bytes across four write() calls to confirm the continuation-byte
         // classification (and thus the char count) is unaffected by where
         // a chunked read happens to cut a multi-byte sequence.
         let content = "あああ"; // 3 chars, 9 bytes
