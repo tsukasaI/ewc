@@ -562,3 +562,31 @@ fn stdin_non_utf8_input_counts_instead_of_erroring() {
     assert!(stdout.contains("\"lines\":1"));
     assert!(stdout.contains("\"words\":2"));
 }
+
+#[test]
+#[cfg(unix)]
+fn directory_scan_reports_unreadable_file_and_exits_nonzero() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("readable.txt"), "hello world\n").unwrap();
+    let unreadable = dir.path().join("unreadable.txt");
+    std::fs::write(&unreadable, "secret\n").unwrap();
+    std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    let result = run_ewc(&[dir.path().to_str().unwrap()]);
+
+    // Restore permissions so the tempdir can be cleaned up.
+    let _ = std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o644));
+
+    if result.stdout.contains("(2 files)") {
+        // Running as root (some CI/sandbox environments) bypasses permission
+        // checks entirely; nothing to assert in that case.
+        return;
+    }
+
+    assert!(!result.success);
+    assert!(result.stderr.contains("unreadable.txt"));
+    // The readable file must still be counted, not silently dropped.
+    assert!(result.stdout.contains("(1 file)"));
+}
