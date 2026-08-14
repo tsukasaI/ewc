@@ -130,6 +130,13 @@ $ cat file.txt | ewc
   form feed, carriage return), not Unicode whitespace — multi-byte Unicode
   whitespace characters (e.g. U+3000 ideographic space, U+00A0 no-break
   space) do not split words.
+- `-L`/`--max-line-length` is the one metric measured in Unicode scalar
+  values (characters) rather than bytes: a line of 10 Japanese characters
+  reports 10, not the ~30 bytes their UTF-8 encoding takes. This is
+  counted without decoding (a byte is counted unless it's a UTF-8
+  continuation byte), so it degrades gracefully rather than erroring on
+  malformed UTF-8, but it is not display-column width — wide characters
+  (e.g. CJK) still count as 1, unlike GNU `wc -L`.
 
 ## Output Format
 
@@ -171,7 +178,8 @@ ewc/
 
 ### Longest Line Length (`-L`)
 
-The `-L` / `--max-line-length` option reports the length of the longest line.
+The `-L` / `--max-line-length` option reports the length of the longest line,
+in characters (Unicode scalar values), not bytes — see Counting Semantics.
 
 #### Output
 
