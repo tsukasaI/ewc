@@ -104,9 +104,13 @@ fn run_json_mode(args: &Args) {
 
     for file in &args.files {
         let path = Path::new(file);
-        let Ok(result) = process_path(path, &config) else {
-            has_error = true;
-            continue;
+        let result = match process_path(path, &config) {
+            Ok(result) => result,
+            Err(e) => {
+                eprintln!("{WARNING_ICON}  {file}: {e}");
+                has_error = true;
+                continue;
+            }
         };
 
         if report_skipped(&result.skipped) {
@@ -124,7 +128,6 @@ fn run_json_mode(args: &Args) {
     }
 
     match results.as_slice() {
-        [] => {}
         [single] => println!("{}", format_json_single(single)),
         _ => println!("{}", format_json_multiple(&results, &total_count)),
     }

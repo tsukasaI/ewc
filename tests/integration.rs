@@ -518,6 +518,24 @@ fn json_mode_continues_after_error() {
     assert!(!result.success);
     assert!(result.stdout.contains("\"files\""));
     assert!(result.stdout.contains("\"total\""));
+    // The failing argument must be identifiable on stderr, matching normal
+    // mode's per-failure warning line.
+    assert!(result.stderr.contains("nonexistent.txt"));
+}
+
+#[test]
+fn json_mode_all_inputs_failing_prints_valid_json_and_reports_errors() {
+    let result = run_ewc(&["--json", "nonexistent1.txt", "nonexistent2.txt"]);
+
+    assert!(!result.success);
+    assert!(result.stderr.contains("nonexistent1.txt"));
+    assert!(result.stderr.contains("nonexistent2.txt"));
+
+    // stdout must still be a single well-formed JSON document, not empty.
+    let parsed: serde_json::Value =
+        serde_json::from_str(result.stdout.trim()).expect("stdout must be valid JSON");
+    assert_eq!(parsed["files"], serde_json::json!([]));
+    assert_eq!(parsed["total"]["file_count"], 0);
 }
 
 #[test]
