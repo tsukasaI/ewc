@@ -19,6 +19,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added `globset` for glob pattern matching
 - Added `rayon` for parallel processing
 
+## [0.4.0] - 2026-08-14
+
+### Fixed
+
+- Count aggregation no longer risks overflow on 32-bit targets or panics in debug builds (`u64` fields with saturating arithmetic)
+- Directory scans no longer silently drop unreadable files or subdirectories from totals — skipped entries are now reported to stderr and reflected in the exit code
+- `--json` output now escapes all control characters per RFC 8259 (previously only a handful were escaped, which could emit invalid JSON for filenames containing others)
+- `--json` mode now reports per-file failures to stderr, and always emits a well-formed JSON document even when every input fails
+- `--max-line-length`/`-L` now counts characters, not UTF-8 bytes, so non-ASCII lines are no longer over-reported
+
+### Changed
+
+- File counting now streams in fixed-size chunks instead of buffering whole files into memory, and no longer requires valid UTF-8 — binary and non-UTF-8 files are counted instead of erroring or being silently skipped
+- Word-splitting now uses ASCII whitespace instead of full Unicode whitespace, a consequence of counting over raw bytes to support binary files
+- `Count`'s public fields (`lines`, `words`, `bytes`, `max_line_length`) changed type from `usize` to `u64`
+
+### Performance
+
+- `Count::from_content` now does a single pass over file content instead of three
+
+### Dependencies
+
+- Added `serde` and `serde_json` for JSON serialization, replacing hand-rolled JSON escaping
+
 ## [0.3.2] - 2026-08-14
 
 ### Dependencies
