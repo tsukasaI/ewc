@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added `globset` for glob pattern matching
 - Added `rayon` for parallel processing
 
+## [0.3.2] - 2026-08-14
+
+### Dependencies
+
+- Updated `clap`, `globset`, `rayon`, and `tempfile` to latest compatible versions
+- Removed unused `colored` dependency
+
 ## [0.3.1] - 2026-02-04
 
 ### Fixed
