@@ -120,6 +120,17 @@ $ cat file.txt | ewc
    Bytes:   1,500
 ```
 
+### Counting Semantics
+
+- Counting operates on raw bytes, not decoded UTF-8 — non-UTF-8 and binary
+  input is counted rather than rejected, the same way `wc` handles arbitrary
+  files. Input is streamed in fixed-size chunks, so memory use doesn't scale
+  with file size.
+- Word boundaries use ASCII whitespace (space, tab, newline, vertical tab,
+  form feed, carriage return), not Unicode whitespace — multi-byte Unicode
+  whitespace characters (e.g. U+3000 ideographic space, U+00A0 no-break
+  space) do not split words.
+
 ## Output Format
 
 ### Number Format

@@ -22,53 +22,79 @@ pub struct Count {
 
 impl Count {
     pub fn from_content(content: &str) -> Self {
-        let mut lines: u64 = 0;
-        let mut words: u64 = 0;
-        let mut max_line_length: u64 = 0;
-        let mut current_line_len: u64 = 0;
-        let mut in_word = false;
-        // Mirrors str::lines(), which trims a lone '\r' immediately before '\n';
-        // track whether the previous char was '\r' so its byte can be backed out
-        // of the line length once we know a following '\n' makes it a CRLF pair.
-        let mut prev_was_cr = false;
+        let mut acc = CountAccumulator::default();
+        acc.write(content.as_bytes());
+        acc.finish()
+    }
+}
 
-        for ch in content.chars() {
-            if ch == '\n' {
-                if prev_was_cr {
-                    current_line_len -= 1;
+// Counts lines/words/bytes/max-line-length over raw bytes rather than `char`s,
+// so it works on arbitrary (non-UTF-8) input the same way `wc` does, and can
+// fold a file in fixed-size chunks without ever buffering it whole (#5, #10).
+// Word boundaries use POSIX isspace()'s ASCII whitespace set rather than
+// char::is_whitespace()'s full Unicode set, since byte-level input has no
+// notion of a Unicode scalar; multi-byte Unicode whitespace (e.g. U+3000,
+// U+00A0) no longer splits words as a result — see README.
+#[derive(Default)]
+struct CountAccumulator {
+    lines: u64,
+    words: u64,
+    bytes: u64,
+    max_line_length: u64,
+    current_line_len: u64,
+    in_word: bool,
+    // Mirrors str::lines(), which trims a lone '\r' immediately before '\n';
+    // track whether the previous byte was '\r' so it can be backed out of the
+    // line length once a following '\n' confirms the CRLF pair.
+    prev_was_cr: bool,
+}
+
+impl CountAccumulator {
+    fn write(&mut self, chunk: &[u8]) {
+        self.bytes += chunk.len() as u64;
+
+        for &b in chunk {
+            if b == b'\n' {
+                if self.prev_was_cr {
+                    self.current_line_len -= 1;
                 }
-                lines += 1;
-                max_line_length = max_line_length.max(current_line_len);
-                current_line_len = 0;
-                in_word = false;
-                prev_was_cr = false;
+                self.lines += 1;
+                self.max_line_length = self.max_line_length.max(self.current_line_len);
+                self.current_line_len = 0;
+                self.in_word = false;
+                self.prev_was_cr = false;
                 continue;
             }
 
-            current_line_len += ch.len_utf8() as u64;
-            prev_was_cr = ch == '\r';
+            self.current_line_len += 1;
+            self.prev_was_cr = b == b'\r';
 
-            if ch.is_whitespace() {
-                in_word = false;
-            } else if !in_word {
-                in_word = true;
-                words += 1;
+            // POSIX isspace(), not u8::is_ascii_whitespace(): the latter
+            // deliberately excludes vertical tab (0x0B), which would silently
+            // change word-splitting behavior for content containing it.
+            if matches!(b, b' ' | b'\t' | 0x0B | 0x0C | b'\r') {
+                self.in_word = false;
+            } else if !self.in_word {
+                self.in_word = true;
+                self.words += 1;
             }
         }
+    }
 
+    fn finish(mut self) -> Count {
         // A trailing partial line (content that doesn't end in '\n') still
         // counts, matching str::lines(); current_line_len > 0 iff such a line
-        // exists, since every non-'\n' char adds at least one byte to it.
-        if current_line_len > 0 {
-            lines += 1;
-            max_line_length = max_line_length.max(current_line_len);
+        // exists, since every non-'\n' byte adds at least one to it.
+        if self.current_line_len > 0 {
+            self.lines += 1;
+            self.max_line_length = self.max_line_length.max(self.current_line_len);
         }
 
-        Self {
-            lines,
-            words,
-            bytes: content.len() as u64,
-            max_line_length,
+        Count {
+            lines: self.lines,
+            words: self.words,
+            bytes: self.bytes,
+            max_line_length: self.max_line_length,
         }
     }
 }
@@ -141,15 +167,31 @@ impl FilterConfig {
     }
 }
 
+// One syscall per 64KiB: large enough that wrapping in a BufReader would be
+// redundant, small enough to sit comfortably on the stack under rayon's
+// per-thread worker stacks during a parallel directory scan.
+const READ_CHUNK_SIZE: usize = 64 * 1024;
+
 pub fn count_file(path: &Path) -> io::Result<Count> {
-    let content = fs::read_to_string(path)?;
-    Ok(Count::from_content(&content))
+    let file = fs::File::open(path)?;
+    count_from_reader(file)
 }
 
 pub fn count_from_reader<R: Read>(mut reader: R) -> io::Result<Count> {
-    let mut content = String::new();
-    reader.read_to_string(&mut content)?;
-    Ok(Count::from_content(&content))
+    let mut acc = CountAccumulator::default();
+    let mut buf = [0u8; READ_CHUNK_SIZE];
+
+    loop {
+        let n = match reader.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        };
+        acc.write(&buf[..n]);
+    }
+
+    Ok(acc.finish())
 }
 
 fn is_hidden(entry: &walkdir::DirEntry) -> bool {
@@ -297,6 +339,54 @@ mod tests {
     }
 
     #[test]
+    fn count_file_non_utf8_succeeds() {
+        use std::io::Write;
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        // 0xFF is not a valid UTF-8 lead or continuation byte anywhere.
+        file.write_all(b"hello\xFF\xFEworld\n").unwrap();
+
+        let count = count_file(file.path()).unwrap();
+        assert_eq!(count.lines, 1);
+        assert_eq!(count.bytes, b"hello\xFF\xFEworld\n".len() as u64);
+    }
+
+    #[test]
+    fn count_from_reader_non_utf8_succeeds() {
+        let data: &[u8] = b"foo\xFFbar baz\n";
+        let count = count_from_reader(data).unwrap();
+        assert_eq!(count.lines, 1);
+        assert_eq!(count.words, 2);
+        assert_eq!(count.bytes, data.len() as u64);
+    }
+
+    #[test]
+    fn count_accumulator_matches_across_chunk_boundaries() {
+        // Split a CRLF pair and a single word ("bar" -> "ba" | "r", with no
+        // whitespace at the split point) across separate write() calls to
+        // simulate content spanning a chunked-read boundary; state carried
+        // in the accumulator (current_line_len, prev_was_cr, and crucially
+        // in_word, which a per-write reset wouldn't need for the other two
+        // splits) must still produce the same result as one single write()
+        // of the whole content.
+        let content = "hello wor\r\nld\nfoo bar";
+        let whole = Count::from_content(content);
+        assert_eq!(whole.words, 5); // hello, wor, ld, foo, bar
+
+        let mut acc = CountAccumulator::default();
+        for chunk in [
+            b"hello wor".as_slice(),
+            b"\r".as_slice(),
+            b"\nld\nfoo ba".as_slice(),
+            b"r".as_slice(),
+        ] {
+            acc.write(chunk);
+        }
+        let chunked = acc.finish();
+
+        assert_eq!(chunked, whole);
+    }
+
+    #[test]
     fn count_default() {
         let count = Count::default();
         assert_eq!(count.lines, 0);
@@ -331,6 +421,15 @@ mod tests {
         assert_eq!(count.lines, 1);
         assert_eq!(count.words, 2);
         assert_eq!(count.max_line_length, 7);
+    }
+
+    #[test]
+    fn count_vertical_tab_is_word_separator() {
+        // u8::is_ascii_whitespace() deliberately excludes vertical tab
+        // (0x0B), unlike POSIX isspace() and char::is_whitespace(); word
+        // splitting must still treat it as whitespace to match wc.
+        let count = Count::from_content("a\u{B}b");
+        assert_eq!(count.words, 2);
     }
 
     #[test]
