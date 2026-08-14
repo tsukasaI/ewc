@@ -1,5 +1,6 @@
 use crate::cli::Args;
 use crate::counter::{Count, FileEntry};
+use serde::Serialize;
 
 pub enum OutputKind {
     File,
@@ -155,50 +156,89 @@ pub struct JsonFileResult {
     pub file_count: Option<usize>,
 }
 
-pub fn format_json_single(result: &JsonFileResult) -> String {
+#[derive(Serialize)]
+struct JsonFile<'a> {
+    file: &'a str,
+    max_line_length: u64,
+    lines: u64,
+    words: u64,
+    bytes: u64,
+}
+
+#[derive(Serialize)]
+struct JsonDirectory<'a> {
+    directory: &'a str,
+    file_count: usize,
+    max_line_length: u64,
+    lines: u64,
+    words: u64,
+    bytes: u64,
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+enum JsonEntry<'a> {
+    File(JsonFile<'a>),
+    Directory(JsonDirectory<'a>),
+}
+
+#[derive(Serialize)]
+struct JsonTotal {
+    file_count: usize,
+    max_line_length: u64,
+    lines: u64,
+    words: u64,
+    bytes: u64,
+}
+
+#[derive(Serialize)]
+struct JsonMultiple<'a> {
+    files: Vec<JsonEntry<'a>>,
+    total: JsonTotal,
+}
+
+fn json_entry(result: &JsonFileResult) -> JsonEntry<'_> {
+    let count = &result.count;
     if result.is_directory {
-        format!(
-            r#"{{"directory":"{}","file_count":{},"max_line_length":{},"lines":{},"words":{},"bytes":{}}}"#,
-            escape_json(&result.name),
-            result.file_count.unwrap_or(0),
-            result.count.max_line_length,
-            result.count.lines,
-            result.count.words,
-            result.count.bytes
-        )
+        JsonEntry::Directory(JsonDirectory {
+            directory: &result.name,
+            file_count: result.file_count.unwrap_or(0),
+            max_line_length: count.max_line_length,
+            lines: count.lines,
+            words: count.words,
+            bytes: count.bytes,
+        })
     } else {
-        format!(
-            r#"{{"file":"{}","max_line_length":{},"lines":{},"words":{},"bytes":{}}}"#,
-            escape_json(&result.name),
-            result.count.max_line_length,
-            result.count.lines,
-            result.count.words,
-            result.count.bytes
-        )
+        JsonEntry::File(JsonFile {
+            file: &result.name,
+            max_line_length: count.max_line_length,
+            lines: count.lines,
+            words: count.words,
+            bytes: count.bytes,
+        })
     }
 }
 
-pub fn format_json_multiple(results: &[JsonFileResult], total: &Count) -> String {
-    let files_json: Vec<String> = results.iter().map(format_json_single).collect();
-    let total_file_count: usize = results.iter().map(|r| r.file_count.unwrap_or(1)).sum();
-
-    format!(
-        r#"{{"files":[{}],"total":{{"file_count":{},"max_line_length":{},"lines":{},"words":{},"bytes":{}}}}}"#,
-        files_json.join(","),
-        total_file_count,
-        total.max_line_length,
-        total.lines,
-        total.words,
-        total.bytes
-    )
+pub fn format_json_single(result: &JsonFileResult) -> String {
+    serde_json::to_string(&json_entry(result)).expect("JsonEntry serialization cannot fail")
 }
 
-fn escape_json(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-        .replace('\t', "\\t")
+pub fn format_json_multiple(results: &[JsonFileResult], total: &Count) -> String {
+    let files: Vec<JsonEntry> = results.iter().map(json_entry).collect();
+    let total_file_count: usize = results.iter().map(|r| r.file_count.unwrap_or(1)).sum();
+
+    let payload = JsonMultiple {
+        files,
+        total: JsonTotal {
+            file_count: total_file_count,
+            max_line_length: total.max_line_length,
+            lines: total.lines,
+            words: total.words,
+            bytes: total.bytes,
+        },
+    };
+
+    serde_json::to_string(&payload).expect("JsonMultiple serialization cannot fail")
 }
 
 pub fn format_total_output(file_count: usize, count: &Count, args: &Args) -> String {
@@ -529,5 +569,115 @@ mod tests {
         let output = format_compact_output("file.txt", &count, OutputKind::File, &args);
         assert!(output.contains("max:120"));
         assert!(!output.contains("lines"));
+    }
+
+    #[test]
+    fn json_single_escapes_all_control_characters_in_name() {
+        // Backspace, form feed, and escape are all legal in POSIX filenames
+        // but are not among \\, ", \n, \r, \t — the set a hand-rolled
+        // escaper would need to special-case individually.
+        let name = "a\u{08}b\u{0C}c\u{1B}d".to_string();
+        let result = JsonFileResult {
+            name,
+            count: Count::default(),
+            is_directory: false,
+            file_count: None,
+        };
+
+        let json = format_json_single(&result);
+
+        // Must be valid, parseable JSON with the exact original name recovered.
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["file"], "a\u{08}b\u{0C}c\u{1B}d");
+        // The raw bytes must not appear unescaped in the emitted JSON text.
+        assert!(!json.contains('\u{08}'));
+        assert!(!json.contains('\u{0C}'));
+        assert!(!json.contains('\u{1B}'));
+    }
+
+    #[test]
+    fn json_single_field_order_matches_documented_example() {
+        let result = JsonFileResult {
+            name: "file.txt".to_string(),
+            count: Count {
+                lines: 50,
+                words: 200,
+                bytes: 1500,
+                max_line_length: 120,
+            },
+            is_directory: false,
+            file_count: None,
+        };
+
+        let json = format_json_single(&result);
+        assert_eq!(
+            json,
+            r#"{"file":"file.txt","max_line_length":120,"lines":50,"words":200,"bytes":1500}"#
+        );
+    }
+
+    #[test]
+    fn json_single_directory_field_order_matches_documented_shape() {
+        let result = JsonFileResult {
+            name: "src".to_string(),
+            count: Count {
+                lines: 10,
+                words: 40,
+                bytes: 300,
+                max_line_length: 20,
+            },
+            is_directory: true,
+            file_count: Some(3),
+        };
+
+        let json = format_json_single(&result);
+        assert_eq!(
+            json,
+            r#"{"directory":"src","file_count":3,"max_line_length":20,"lines":10,"words":40,"bytes":300}"#
+        );
+    }
+
+    #[test]
+    fn json_multiple_escapes_control_characters_and_nests_total() {
+        let name = "weird\u{1B}name.txt".to_string();
+        let results = vec![
+            JsonFileResult {
+                name: name.clone(),
+                count: Count {
+                    lines: 1,
+                    words: 2,
+                    bytes: 10,
+                    max_line_length: 5,
+                },
+                is_directory: false,
+                file_count: None,
+            },
+            JsonFileResult {
+                name: "dir".to_string(),
+                count: Count {
+                    lines: 3,
+                    words: 4,
+                    bytes: 20,
+                    max_line_length: 8,
+                },
+                is_directory: true,
+                file_count: Some(2),
+            },
+        ];
+        let total = Count {
+            lines: 4,
+            words: 6,
+            bytes: 30,
+            max_line_length: 8,
+        };
+
+        let json = format_json_multiple(&results, &total);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed["files"][0]["file"], "weird\u{1B}name.txt");
+        assert!(!json.contains('\u{1B}'));
+        assert_eq!(parsed["files"][1]["directory"], "dir");
+        assert_eq!(parsed["total"]["file_count"], 3); // 1 file + 2 in the directory
+        assert_eq!(parsed["total"]["lines"], 4);
     }
 }
