@@ -238,9 +238,16 @@ fn walk_directory(
                 let entry_path = e
                     .path()
                     .map_or_else(|| path.to_path_buf(), Path::to_path_buf);
+                // walkdir::Error's Display already includes the path when one
+                // is available ("IO error for operation on {path}: {err}"),
+                // so fall back to the inner io::Error's message to avoid
+                // printing the path twice in the reported warning line.
+                let error = e
+                    .io_error()
+                    .map_or_else(|| e.to_string(), ToString::to_string);
                 skipped.push(SkippedEntry {
                     path: entry_path,
-                    error: e.to_string(),
+                    error,
                 });
                 continue;
             }
@@ -305,8 +312,10 @@ pub fn count_directory_detailed(
         }
     }
 
-    // Sort for deterministic output
+    // Sort for deterministic output; walk order is OS-dependent, and the
+    // rayon phase above preserves the (already-walked) file_paths order.
     entries.sort_by(|a, b| a.path.cmp(&b.path));
+    skipped.sort_by(|a, b| a.path.cmp(&b.path));
 
     let total = entries.iter().map(|e| e.count).sum();
     Ok((entries, total, skipped))
@@ -569,8 +578,9 @@ mod tests {
         std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o000)).unwrap();
 
         let result = count_directory(dir.path(), &default_config());
+        // Not required for tempdir cleanup (unlinking only needs write access
+        // to the parent directory), but restoring is good hygiene regardless.
         let restore = || {
-            // Restore permissions so tempdir cleanup can remove the file.
             let _ = std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o644));
         };
 
@@ -593,6 +603,55 @@ mod tests {
         assert_eq!(count.lines, 1);
         assert_eq!(skipped.len(), 1);
         assert_eq!(skipped[0].path, unreadable);
+        assert!(!skipped[0].error.is_empty());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn count_directory_reports_unreadable_subdirectory_as_skipped() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+
+        let readable = dir.path().join("readable.txt");
+        let mut f = std::fs::File::create(&readable).unwrap();
+        writeln!(f, "hello world").unwrap();
+
+        // Without the execute bit, walkdir cannot read_dir into this
+        // subdirectory at all — this exercises the walk-phase error path
+        // (layer 1), distinct from a per-file read failure (layer 2), which
+        // count_directory_reports_unreadable_file_as_skipped covers.
+        let locked_subdir = dir.path().join("locked");
+        std::fs::create_dir(&locked_subdir).unwrap();
+        std::fs::write(locked_subdir.join("inside.txt"), "unreachable").unwrap();
+        std::fs::set_permissions(&locked_subdir, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let result = count_directory(dir.path(), &default_config());
+        let restore = || {
+            let _ =
+                std::fs::set_permissions(&locked_subdir, std::fs::Permissions::from_mode(0o755));
+        };
+
+        let (count, file_count, skipped) = match result {
+            Ok(v) => v,
+            Err(e) => {
+                restore();
+                panic!("count_directory failed: {e}");
+            }
+        };
+        restore();
+
+        // Running as root (some CI/sandbox environments) bypasses permission
+        // checks entirely, in which case there's nothing to assert here.
+        if skipped.is_empty() && file_count == 2 {
+            return;
+        }
+
+        assert_eq!(file_count, 1);
+        assert_eq!(count.lines, 1);
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].path, locked_subdir);
         assert!(!skipped[0].error.is_empty());
     }
 

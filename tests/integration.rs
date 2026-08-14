@@ -576,7 +576,8 @@ fn directory_scan_reports_unreadable_file_and_exits_nonzero() {
 
     let result = run_ewc(&[dir.path().to_str().unwrap()]);
 
-    // Restore permissions so the tempdir can be cleaned up.
+    // Not required for tempdir cleanup (unlinking only needs write access to
+    // the parent directory), but restoring is good hygiene regardless.
     let _ = std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o644));
 
     if result.stdout.contains("(2 files)") {
