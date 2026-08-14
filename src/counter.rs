@@ -31,8 +31,10 @@ impl Count {
 // Counts lines/words/bytes/max-line-length over raw bytes rather than `char`s,
 // so it works on arbitrary (non-UTF-8) input the same way `wc` does, and can
 // fold a file in fixed-size chunks without ever buffering it whole (#5, #10).
-// Word boundaries use ASCII whitespace rather than char::is_whitespace()'s
-// full Unicode set, since byte-level input has no notion of a Unicode scalar.
+// Word boundaries use POSIX isspace()'s ASCII whitespace set rather than
+// char::is_whitespace()'s full Unicode set, since byte-level input has no
+// notion of a Unicode scalar; multi-byte Unicode whitespace (e.g. U+3000,
+// U+00A0) no longer splits words as a result — see README.
 #[derive(Default)]
 struct CountAccumulator {
     lines: u64,
@@ -67,7 +69,10 @@ impl CountAccumulator {
             self.current_line_len += 1;
             self.prev_was_cr = b == b'\r';
 
-            if b.is_ascii_whitespace() {
+            // POSIX isspace(), not u8::is_ascii_whitespace(): the latter
+            // deliberately excludes vertical tab (0x0B), which would silently
+            // change word-splitting behavior for content containing it.
+            if matches!(b, b' ' | b'\t' | 0x0B | 0x0C | b'\r') {
                 self.in_word = false;
             } else if !self.in_word {
                 self.in_word = true;
@@ -162,6 +167,9 @@ impl FilterConfig {
     }
 }
 
+// One syscall per 64KiB: large enough that wrapping in a BufReader would be
+// redundant, small enough to sit comfortably on the stack under rayon's
+// per-thread worker stacks during a parallel directory scan.
 const READ_CHUNK_SIZE: usize = 64 * 1024;
 
 pub fn count_file(path: &Path) -> io::Result<Count> {
@@ -174,10 +182,12 @@ pub fn count_from_reader<R: Read>(mut reader: R) -> io::Result<Count> {
     let mut buf = [0u8; READ_CHUNK_SIZE];
 
     loop {
-        let n = reader.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
+        let n = match reader.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        };
         acc.write(&buf[..n]);
     }
 
@@ -351,19 +361,23 @@ mod tests {
 
     #[test]
     fn count_accumulator_matches_across_chunk_boundaries() {
-        // Split a CRLF pair and a word across separate write() calls to
+        // Split a CRLF pair and a single word ("bar" -> "ba" | "r", with no
+        // whitespace at the split point) across separate write() calls to
         // simulate content spanning a chunked-read boundary; state carried
-        // in the accumulator must still produce the same result as one
-        // single write() of the whole content.
+        // in the accumulator (current_line_len, prev_was_cr, and crucially
+        // in_word, which a per-write reset wouldn't need for the other two
+        // splits) must still produce the same result as one single write()
+        // of the whole content.
         let content = "hello wor\r\nld\nfoo bar";
         let whole = Count::from_content(content);
+        assert_eq!(whole.words, 5); // hello, wor, ld, foo, bar
 
         let mut acc = CountAccumulator::default();
         for chunk in [
             b"hello wor".as_slice(),
             b"\r".as_slice(),
-            b"\nld\nfoo ".as_slice(),
-            b"bar".as_slice(),
+            b"\nld\nfoo ba".as_slice(),
+            b"r".as_slice(),
         ] {
             acc.write(chunk);
         }
@@ -407,6 +421,15 @@ mod tests {
         assert_eq!(count.lines, 1);
         assert_eq!(count.words, 2);
         assert_eq!(count.max_line_length, 7);
+    }
+
+    #[test]
+    fn count_vertical_tab_is_word_separator() {
+        // u8::is_ascii_whitespace() deliberately excludes vertical tab
+        // (0x0B), unlike POSIX isspace() and char::is_whitespace(); word
+        // splitting must still treat it as whitespace to match wc.
+        let count = Count::from_content("a\u{B}b");
+        assert_eq!(count.words, 2);
     }
 
     #[test]

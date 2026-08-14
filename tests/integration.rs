@@ -533,16 +533,19 @@ fn directory_and_nonexistent_file() {
 #[test]
 fn non_utf8_file_counts_instead_of_erroring() {
     let file = create_test_file_bytes(b"hello\xFF\xFEworld\n");
-    let result = run_ewc(&[file.path().to_str().unwrap()]);
+    let result = run_ewc(&["--json", file.path().to_str().unwrap()]);
 
     assert!(result.success);
-    assert!(result.stdout.contains("Lines:"));
-    assert!(result.stdout.contains("1"));
+    assert!(result.stdout.contains("\"lines\":1"));
+    assert!(result
+        .stdout
+        .contains(&format!("\"bytes\":{}", b"hello\xFF\xFEworld\n".len())));
 }
 
 #[test]
 fn stdin_non_utf8_input_counts_instead_of_erroring() {
     let output = Command::new("./target/debug/ewc")
+        .args(["--json"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -556,5 +559,6 @@ fn stdin_non_utf8_input_counts_instead_of_erroring() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Lines:"));
+    assert!(stdout.contains("\"lines\":1"));
+    assert!(stdout.contains("\"words\":2"));
 }
