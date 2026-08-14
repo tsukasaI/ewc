@@ -71,6 +71,11 @@ fn run_stdin_mode(args: &Args) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("{WARNING_ICON}  <stdin>: {e}");
+            if args.json {
+                // Keep stdout valid JSON even on failure, matching
+                // run_json_mode's all-inputs-failed behavior.
+                println!("{}", format_json_multiple(&[], &Count::default()));
+            }
             process::exit(1);
         }
     };
@@ -127,8 +132,14 @@ fn run_json_mode(args: &Args) {
         total_count += result.count;
     }
 
-    match results.as_slice() {
-        [single] => println!("{}", format_json_single(single)),
+    // Shape is chosen by how many arguments were given, not how many
+    // succeeded: otherwise `ewc --json good.txt bad.txt` (1 success of 2
+    // args) would return the bare single-object shape while
+    // `ewc --json bad1.txt bad2.txt` (0 successes) returns the {files,
+    // total} envelope — an unpredictable schema for a pipe consumer that
+    // can't know success counts ahead of time (#27).
+    match (args.files.len(), results.as_slice()) {
+        (1, [single]) => println!("{}", format_json_single(single)),
         _ => println!("{}", format_json_multiple(&results, &total_count)),
     }
 
