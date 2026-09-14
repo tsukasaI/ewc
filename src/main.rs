@@ -74,6 +74,46 @@ fn create_filter_config(args: &Args) -> io::Result<FilterConfig> {
     FilterConfig::new(args.all, &args.exclude, &args.include)
 }
 
+/// Sanitizes every element of `argv` and re-parses it.
+///
+/// Sanitizing argv and re-parsing, rather than sanitizing clap's
+/// already-rendered error text, matters because a raw newline in an
+/// argument would otherwise reach `.lines()` and split into a second,
+/// forged-looking line before any per-line sanitizer ever saw it.
+fn reparse_sanitized_argv(
+    argv: impl IntoIterator<Item = std::ffi::OsString>,
+) -> Result<Args, clap::Error> {
+    let clean_args: Vec<String> = argv
+        .into_iter()
+        .map(|a| sanitize_for_display(&a.to_string_lossy(), true).into_owned())
+        .collect();
+    Args::try_parse_from(clean_args)
+}
+
+/// Exits with a sanitized rendering of a clap parse error.
+fn exit_with_sanitized_parse_error(
+    original: clap::Error,
+    argv: impl IntoIterator<Item = std::ffi::OsString>,
+) -> ! {
+    match reparse_sanitized_argv(argv) {
+        Err(clean_err) if clean_err.use_stderr() => clean_err.exit(),
+        _ => {
+            // Sanitized argv unexpectedly parsed cleanly (or hit
+            // help/version); fall back to the original error as a
+            // fail-closed path. Sanitized as a single string rather than
+            // split into lines first: the rendered text can't distinguish
+            // clap's own newlines from argument-derived ones, so splitting
+            // on them first would reopen the same forgery this function
+            // exists to close.
+            eprintln!(
+                "{}",
+                sanitize_for_display(&original.render().to_string(), true)
+            );
+            process::exit(original.exit_code());
+        }
+    }
+}
+
 fn main() {
     let args = match Args::try_parse() {
         Ok(args) => args,
@@ -84,25 +124,7 @@ fn main() {
         // false there) go through clap's own exit() unchanged.
         Err(e) if e.use_stderr() => {
             if io::stderr().is_terminal() {
-                // Sanitize argv and re-parse instead of sanitizing clap's
-                // already-rendered text: a raw newline in an argument would
-                // otherwise split into a second line before the per-line
-                // sanitizer ever sees it, forging arbitrary extra output.
-                let clean_args: Vec<String> = std::env::args_os()
-                    .map(|a| sanitize_for_display(&a.to_string_lossy(), true).into_owned())
-                    .collect();
-                match Args::try_parse_from(clean_args) {
-                    Err(clean_err) if clean_err.use_stderr() => clean_err.exit(),
-                    _ => {
-                        // Sanitized argv unexpectedly parsed cleanly (or hit
-                        // help/version); fall back to the original error as a
-                        // fail-closed path, still sanitized line-by-line.
-                        for line in e.render().to_string().lines() {
-                            eprintln!("{}", sanitize_for_display(line, true));
-                        }
-                        process::exit(e.exit_code());
-                    }
-                }
+                exit_with_sanitized_parse_error(e, std::env::args_os());
             } else {
                 e.exit();
             }
@@ -115,7 +137,12 @@ fn main() {
     let config = match create_filter_config(&args) {
         Ok(config) => config,
         Err(e) => {
-            eprintln!("{}{e}", icon(args.no_color, WARNING_ICON));
+            let is_tty = io::stderr().is_terminal();
+            eprintln!(
+                "{}{}",
+                icon(args.no_color, WARNING_ICON),
+                sanitize_for_display(&e.to_string(), is_tty)
+            );
             if args.json {
                 // Keep stdout valid JSON even on failure, matching
                 // run_json_mode's all-inputs-failed behavior.
@@ -327,20 +354,29 @@ fn run_normal_mode(args: &Args, config: &FilterConfig) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::Parser;
+    use std::ffi::OsString;
 
     #[test]
-    fn sanitizing_argv_before_reparse_removes_embedded_newlines() {
-        // A raw newline in an argument, once echoed into clap's rendered
-        // error text, would look like a second, forged line of output. The
-        // fix sanitizes argv *before* clap ever sees it, so the newline
-        // can't reach the parser (and therefore can't reach the rendered
-        // error) in the first place.
-        let malicious = "--bogus\nerror: FORGED LINE";
-        let clean = sanitize_for_display(malicious, true).into_owned();
-        assert!(!clean.contains('\n'));
+    fn invalid_glob_pattern_error_is_sanitized() {
+        let config = FilterConfig::new(false, &["[\nerror: FORGED GLOB".to_string()], &[]);
+        let e = config.unwrap_err().to_string();
+        let sanitized = sanitize_for_display(&e, true);
+        assert!(!sanitized.contains('\n'));
+        assert!(sanitized.contains('\u{FFFD}'));
+    }
 
-        let err = Args::try_parse_from(["ewc", &clean]).unwrap_err();
+    #[test]
+    fn reparse_sanitized_argv_removes_embedded_newlines() {
+        // A raw newline in an argument, once echoed into clap's rendered
+        // error text, would look like a second, forged line of output.
+        // reparse_sanitized_argv sanitizes argv *before* clap ever sees it,
+        // so the newline can't reach the parser (and therefore can't reach
+        // the rendered error) in the first place.
+        let argv = [
+            OsString::from("ewc"),
+            OsString::from("--bogus\nerror: FORGED LINE"),
+        ];
+        let err = reparse_sanitized_argv(argv).unwrap_err();
         let rendered = err.render().to_string();
         // The forged text can still appear (it's just an odd flag value),
         // but never as a line of its own: the newline that would have
