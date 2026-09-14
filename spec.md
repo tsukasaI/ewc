@@ -72,11 +72,11 @@ $ ewc -v src/
 | `--words` | `-w` | Show word count only |
 | `--bytes` | `-c` | Show byte count only |
 | `--max-line-length` | `-L` | Show longest line length, in characters (not bytes) |
-| `--verbose` | `-v` | Show file list (directories) |
+| `--verbose` | `-v` | Show file list (directories); cannot be combined with `--compact` |
 | `--all` | `-a` | Include hidden files/directories |
-| `--compact` | `-C` | Single-line output |
+| `--compact` | `-C` | Single-line output; cannot be combined with `--verbose` |
 | `--no-color` | - | Disable icons |
-| `--json` | - | JSON output (cannot be combined with `--compact`, `--verbose`, or `--no-color`, which have no meaning for JSON) |
+| `--json` | - | JSON output (cannot be combined with `--compact` or `--verbose`) |
 | `--exclude` | - | Exclude files matching glob pattern (repeatable) |
 | `--include` | - | Include only files matching glob pattern (repeatable) |
 
@@ -156,7 +156,7 @@ $ cat file.txt | ewc -
   argument that fails, or an invalid `--exclude`/`--include` pattern,
   still falls back to the `{"files": [...], "total": {...}}` envelope
   with an empty `files` array; unifying that with stdin's behavior is
-  tracked separately
+  tracked separately (#108)
 - A directory (or the aggregate `total` in the envelope shape) includes
   a `skipped_count` field when one or more of its *own* entries couldn't
   be counted (permission denied, vanished mid-walk, etc.), so a consumer
