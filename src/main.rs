@@ -74,7 +74,11 @@ fn main() {
         }
     };
 
-    if args.files.is_empty() {
+    // A single bare "-" is a request to read stdin, matching wc.
+    let reads_stdin =
+        args.files.is_empty() || (args.files.len() == 1 && args.files[0].as_os_str() == "-");
+
+    if reads_stdin {
         run_stdin_mode(&args);
     } else if args.json {
         run_json_mode(&args, &config);
@@ -127,7 +131,7 @@ fn run_json_mode(args: &Args, config: &FilterConfig) {
         let result = match process_path(path, config) {
             Ok(result) => result,
             Err(e) => {
-                eprintln!("{WARNING_ICON}  {file}: {e}");
+                eprintln!("{WARNING_ICON}  {}: {e}", file.display());
                 has_error = true;
                 continue;
             }
@@ -143,7 +147,7 @@ fn run_json_mode(args: &Args, config: &FilterConfig) {
             OutputKind::File
         };
         results.push(JsonFileResult {
-            name: file.clone(),
+            name: file.to_string_lossy().into_owned(),
             count: result.count,
             kind,
         });
@@ -195,7 +199,7 @@ fn run_normal_mode(args: &Args, config: &FilterConfig) {
                     }
                 }
                 Err(e) => {
-                    eprintln!("{WARNING_ICON}  {file}: {e}");
+                    eprintln!("{WARNING_ICON}  {}: {e}", file.display());
                     has_error = true;
                 }
             }
@@ -207,10 +211,11 @@ fn run_normal_mode(args: &Args, config: &FilterConfig) {
                     } else {
                         OutputKind::File
                     };
+                    let name = file.to_string_lossy();
                     let output = if args.compact {
-                        format_compact_output(file, &result.count, kind, args)
+                        format_compact_output(&name, &result.count, kind, args)
                     } else {
-                        format_output(file, &result.count, kind, args)
+                        format_output(&name, &result.count, kind, args)
                     };
                     println!("{output}");
 
@@ -227,7 +232,7 @@ fn run_normal_mode(args: &Args, config: &FilterConfig) {
                     }
                 }
                 Err(e) => {
-                    eprintln!("{WARNING_ICON}  {file}: {e}");
+                    eprintln!("{WARNING_ICON}  {}: {e}", file.display());
                     has_error = true;
                 }
             }
