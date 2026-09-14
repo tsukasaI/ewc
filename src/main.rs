@@ -9,19 +9,11 @@ use ewc::counter::{
 };
 use ewc::output::{
     format_compact_output, format_compact_total, format_json_multiple, format_json_single,
-    format_output, format_separator, format_total_output, format_verbose_output, JsonFileResult,
-    OutputKind,
+    format_output, format_separator, format_total_output, format_verbose_output, icon,
+    JsonFileResult, OutputKind,
 };
 
-const WARNING_ICON: &str = "\u{26A0}\u{FE0F}";
-
-fn warning_icon(no_color: bool) -> &'static str {
-    if no_color {
-        ""
-    } else {
-        WARNING_ICON
-    }
-}
+const WARNING_ICON: &str = "\u{26A0}\u{FE0F}  ";
 
 struct ProcessResult {
     count: Count,
@@ -54,9 +46,9 @@ fn process_path(path: &Path, config: &FilterConfig) -> io::Result<ProcessResult>
 /// top-level-failure style. Returns whether anything was skipped, so callers
 /// can fold it into the process's exit code.
 fn report_skipped(skipped: &[SkippedEntry], no_color: bool) -> bool {
-    let icon = warning_icon(no_color);
+    let warning = icon(no_color, WARNING_ICON);
     for entry in skipped {
-        eprintln!("{icon}  {}: {}", entry.path.display(), entry.error);
+        eprintln!("{warning}{}: {}", entry.path.display(), entry.error);
     }
     !skipped.is_empty()
 }
@@ -73,7 +65,7 @@ fn main() {
     let config = match create_filter_config(&args) {
         Ok(config) => config,
         Err(e) => {
-            eprintln!("{}  {e}", warning_icon(args.no_color));
+            eprintln!("{}{e}", icon(args.no_color, WARNING_ICON));
             if args.json {
                 // Keep stdout valid JSON even on failure, matching
                 // run_json_mode's all-inputs-failed behavior.
@@ -100,7 +92,7 @@ fn run_stdin_mode(args: &Args) {
     let count = match count_from_reader(io::stdin().lock()) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("{}  <stdin>: {e}", warning_icon(args.no_color));
+            eprintln!("{}<stdin>: {e}", icon(args.no_color, WARNING_ICON));
             if args.json {
                 // Keep stdout valid JSON even on failure, matching
                 // run_json_mode's all-inputs-failed behavior.
@@ -140,7 +132,11 @@ fn run_json_mode(args: &Args, config: &FilterConfig) {
         let result = match process_path(path, config) {
             Ok(result) => result,
             Err(e) => {
-                eprintln!("{}  {}: {e}", warning_icon(args.no_color), file.display());
+                eprintln!(
+                    "{}{}: {e}",
+                    icon(args.no_color, WARNING_ICON),
+                    file.display()
+                );
                 has_error = true;
                 continue;
             }
@@ -208,7 +204,11 @@ fn run_normal_mode(args: &Args, config: &FilterConfig) {
                     }
                 }
                 Err(e) => {
-                    eprintln!("{}  {}: {e}", warning_icon(args.no_color), file.display());
+                    eprintln!(
+                        "{}{}: {e}",
+                        icon(args.no_color, WARNING_ICON),
+                        file.display()
+                    );
                     has_error = true;
                 }
             }
@@ -241,7 +241,11 @@ fn run_normal_mode(args: &Args, config: &FilterConfig) {
                     }
                 }
                 Err(e) => {
-                    eprintln!("{}  {}: {e}", warning_icon(args.no_color), file.display());
+                    eprintln!(
+                        "{}{}: {e}",
+                        icon(args.no_color, WARNING_ICON),
+                        file.display()
+                    );
                     has_error = true;
                 }
             }

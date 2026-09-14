@@ -49,7 +49,7 @@ fn pluralize_files(count: usize) -> &'static str {
 const FILE_ICON: &str = "\u{1F4C4} ";
 const DIR_ICON: &str = "\u{1F4C1} ";
 
-fn icon(no_color: bool, glyph: &'static str) -> &'static str {
+pub fn icon(no_color: bool, glyph: &'static str) -> &'static str {
     if no_color {
         ""
     } else {
