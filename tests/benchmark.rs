@@ -21,15 +21,38 @@ fn bench_wc(path: &str, runs: u32) -> std::time::Duration {
     start.elapsed()
 }
 
-fn bench_ewc(path: &str, runs: u32) -> std::time::Duration {
+// Also validates correctness (not just timing): a benchmark that only
+// prints numbers can't fail even if ewc's output silently regresses.
+fn bench_ewc(path: &str, runs: u32, expected_lines: usize) -> std::time::Duration {
     let start = Instant::now();
+    let mut last_output = None;
     for _ in 0..runs {
-        Command::new(env!("CARGO_BIN_EXE_ewc"))
+        let output = Command::new(env!("CARGO_BIN_EXE_ewc"))
             .arg(path)
             .output()
             .expect("failed to run ewc");
+        last_output = Some(output);
     }
-    start.elapsed()
+    let elapsed = start.elapsed();
+
+    let stdout = String::from_utf8_lossy(&last_output.unwrap().stdout).into_owned();
+    let expected = format_number_with_commas(expected_lines);
+    assert!(
+        stdout.contains(&expected),
+        "ewc's line count didn't match the {expected_lines}-line test file: {stdout}"
+    );
+
+    elapsed
+}
+
+fn format_number_with_commas(n: usize) -> String {
+    n.to_string()
+        .as_bytes()
+        .rchunks(3)
+        .rev()
+        .map(|chunk| std::str::from_utf8(chunk).unwrap())
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 #[test]
@@ -43,7 +66,7 @@ fn benchmark_comparison() {
 
     println!("Small file (1K lines) - {} runs:", runs);
     let wc_time = bench_wc(small.path().to_str().unwrap(), runs);
-    let ewc_time = bench_ewc(small.path().to_str().unwrap(), runs);
+    let ewc_time = bench_ewc(small.path().to_str().unwrap(), runs, 1_000);
     println!("  wc:  {:?} ({:.2?} per run)", wc_time, wc_time / runs);
     println!("  ewc: {:?} ({:.2?} per run)", ewc_time, ewc_time / runs);
     println!(
@@ -57,7 +80,7 @@ fn benchmark_comparison() {
 
     println!("\nMedium file (100K lines) - {} runs:", runs);
     let wc_time = bench_wc(medium.path().to_str().unwrap(), runs);
-    let ewc_time = bench_ewc(medium.path().to_str().unwrap(), runs);
+    let ewc_time = bench_ewc(medium.path().to_str().unwrap(), runs, 100_000);
     println!("  wc:  {:?} ({:.2?} per run)", wc_time, wc_time / runs);
     println!("  ewc: {:?} ({:.2?} per run)", ewc_time, ewc_time / runs);
     println!(
@@ -71,7 +94,7 @@ fn benchmark_comparison() {
 
     println!("\nLarge file (500K lines) - {} runs:", runs);
     let wc_time = bench_wc(large.path().to_str().unwrap(), runs);
-    let ewc_time = bench_ewc(large.path().to_str().unwrap(), runs);
+    let ewc_time = bench_ewc(large.path().to_str().unwrap(), runs, 500_000);
     println!("  wc:  {:?} ({:.2?} per run)", wc_time, wc_time / runs);
     println!("  ewc: {:?} ({:.2?} per run)", ewc_time, ewc_time / runs);
     println!(
