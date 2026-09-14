@@ -49,11 +49,11 @@ fn pluralize_files(count: usize) -> &'static str {
 const FILE_ICON: &str = "\u{1F4C4} ";
 const DIR_ICON: &str = "\u{1F4C1} ";
 
-fn icon(no_color: bool, icon: &'static str) -> &'static str {
+fn icon(no_color: bool, glyph: &'static str) -> &'static str {
     if no_color {
         ""
     } else {
-        icon
+        glyph
     }
 }
 
@@ -529,8 +529,9 @@ mod tests {
             ..default_args()
         };
         let output = format_compact_total(5, &count, &args);
-        assert!(output.contains("Total (5 files):"));
-        assert!(output.contains("235 lines"));
+        // Exact match, not a substring: pins the single-space spacing this
+        // shares with format_compact_output's Directory arm (#51).
+        assert!(output.starts_with("Total (5 files): 235 lines"));
     }
 
     #[test]

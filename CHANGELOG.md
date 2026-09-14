@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Removed
 
 - `counter::count_directory`; call `count_directory_detailed` and use `entries.len()` for the file count
+- `Count::from_content`; it is now test-only. Use `count_from_reader(content.as_bytes())` to count in-memory content
 
 ## [0.4.0] - 2026-08-14
 
