@@ -18,9 +18,6 @@
             version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).package.version;
             src = ./.;
             cargoLock.lockFile = ./Cargo.lock;
-            # Skip integration tests in Nix sandbox (requires filesystem access)
-            # Unit tests still run
-            cargoTestFlags = [ "--lib" ];
 
             meta = with pkgs.lib; {
               description = "Enhanced Word Count - A modern alternative to wc";
