@@ -34,6 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - `counter::count_directory`; call `count_directory_detailed` and use `entries.len()` for the file count
 - `Count::from_content`; it is now test-only. Use `count_from_reader(content.as_bytes())` to count in-memory content
+- `Formula/ewc.rb`, a stale, non-functional Homebrew formula for a tap that doesn't exist
+- `cliff.toml`; the changelog is maintained by hand and no workflow read this file
+- `.pre-commit-config.yaml` is no longer tracked (it's now gitignored instead); `git-hooks.nix` regenerates it as a machine-specific symlink into `/nix/store` on every `nix develop`, so tracking it only produced constant, meaningless churn
 
 ## [0.4.0] - 2026-08-14
 
