@@ -75,7 +75,22 @@ fn create_filter_config(args: &Args) -> io::Result<FilterConfig> {
 }
 
 fn main() {
-    let args = Args::parse();
+    let args = match Args::try_parse() {
+        Ok(args) => args,
+        // A parse error can echo back an argument verbatim (e.g. an
+        // unrecognized flag that's actually a filename from shell glob
+        // expansion), so it needs the same terminal sanitization as any
+        // other filename-derived output; --help/--version (use_stderr() is
+        // false there) go through clap's own exit() unchanged.
+        Err(e) if e.use_stderr() => {
+            let is_tty = io::stderr().is_terminal();
+            for line in e.render().to_string().lines() {
+                eprintln!("{}", sanitize_for_display(line, is_tty));
+            }
+            process::exit(e.exit_code());
+        }
+        Err(e) => e.exit(),
+    };
 
     // Built once, before mode dispatch, so an invalid --exclude/--include
     // pattern is caught even in stdin mode instead of being silently ignored.
@@ -129,12 +144,24 @@ fn run_stdin_mode(args: &Args) {
     } else if args.compact {
         println!(
             "{}",
-            format_compact_output("<stdin>", &count, OutputKind::File, args)
+            format_compact_output(
+                "<stdin>",
+                &count,
+                OutputKind::File,
+                args,
+                io::stdout().is_terminal()
+            )
         );
     } else {
         println!(
             "{}",
-            format_output("<stdin>", &count, OutputKind::File, args)
+            format_output(
+                "<stdin>",
+                &count,
+                OutputKind::File,
+                args,
+                io::stdout().is_terminal()
+            )
         );
     }
 }
@@ -194,6 +221,7 @@ fn run_normal_mode(args: &Args, config: &FilterConfig) {
     let mut total_file_count = 0;
     let mut successful_args = 0;
     let file_count = args.files.len();
+    let is_terminal = io::stdout().is_terminal();
 
     for (index, file) in args.files.iter().enumerate() {
         let path = file.as_path();
@@ -202,7 +230,10 @@ fn run_normal_mode(args: &Args, config: &FilterConfig) {
         if path.is_dir() && args.verbose {
             match count_directory_detailed(path, config) {
                 Ok((entries, dir_total, skipped)) => {
-                    println!("{}", format_verbose_output(&entries, &dir_total, args));
+                    println!(
+                        "{}",
+                        format_verbose_output(&entries, &dir_total, args, is_terminal)
+                    );
 
                     if report_skipped(&skipped, args.no_color) {
                         has_error = true;
@@ -231,9 +262,9 @@ fn run_normal_mode(args: &Args, config: &FilterConfig) {
                     };
                     let name = file.to_string_lossy();
                     let output = if args.compact {
-                        format_compact_output(&name, &result.count, kind, args)
+                        format_compact_output(&name, &result.count, kind, args, is_terminal)
                     } else {
-                        format_output(&name, &result.count, kind, args)
+                        format_output(&name, &result.count, kind, args, is_terminal)
                     };
                     println!("{output}");
 

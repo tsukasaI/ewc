@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Security
 
-- Filenames containing terminal control characters (e.g. an embedded ANSI escape sequence) no longer manipulate the terminal when printed. Control characters and DEL are replaced with U+FFFD in human-readable output when stdout/stderr is actually a terminal; piped/redirected output and `--json` (which already escapes control characters) are unaffected
+- Filenames containing terminal control characters (e.g. an embedded ANSI escape sequence, or its single-byte C1 form) no longer manipulate the terminal when printed. C0/C1 control characters and DEL are replaced with U+FFFD in human-readable output, including clap's own argument-parsing error messages, when stdout/stderr is actually a terminal; piped/redirected output and `--json` (which escapes only C0 control characters, a JSON-validity concern rather than a terminal-safety one) are unaffected
 
 ### Fixed
 
