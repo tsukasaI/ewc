@@ -123,6 +123,16 @@ The warning goes to stderr and the file block to stdout; the blank line
 above is only a formatting convenience in this doc, not something the
 program guarantees between the two streams.
 
+### Filenames With Control Characters
+
+A filename containing a control character (e.g. an embedded ANSI escape
+sequence) is displayed with those characters replaced by U+FFFD when
+stdout/stderr is an actual terminal, so it can't manipulate the terminal
+(move the cursor, forge extra lines, change colors, etc.) when printed.
+Piped or redirected output, and `--json` (whose control-character
+escaping is a JSON encoding concern, not a terminal-safety one), pass
+the raw name through unmodified.
+
 ### Standard Input
 
 When no arguments are provided, or the sole argument is `-`, reads from

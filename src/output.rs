@@ -1,11 +1,35 @@
 use crate::cli::Args;
 use crate::counter::{Count, FileEntry};
 use serde::Serialize;
+use std::borrow::Cow;
+use std::io::IsTerminal;
 
 #[derive(Clone, Copy)]
 pub enum OutputKind {
     File,
     Directory(usize),
+}
+
+/// Replaces C0 control characters (including ESC) and DEL with the Unicode
+/// replacement character, so a filename containing an embedded terminal
+/// escape sequence can't manipulate the terminal when printed. Callers pass
+/// whether the destination stream is actually a terminal: a piped or
+/// redirected stream doesn't interpret escape codes, so there's nothing to
+/// guard there, and JSON output already escapes control characters via
+/// serde regardless of this function.
+pub fn sanitize_for_display(name: &str, is_terminal: bool) -> Cow<'_, str> {
+    if !is_terminal || name.chars().all(|c| !is_control_or_del(c)) {
+        return Cow::Borrowed(name);
+    }
+    Cow::Owned(
+        name.chars()
+            .map(|c| if is_control_or_del(c) { '\u{FFFD}' } else { c })
+            .collect(),
+    )
+}
+
+fn is_control_or_del(c: char) -> bool {
+    (c as u32) < 0x20 || c as u32 == 0x7f
 }
 
 pub fn format_number(n: u64) -> String {
@@ -58,6 +82,7 @@ fn icon(no_color: bool, glyph: &'static str) -> &'static str {
 }
 
 fn format_header(name: &str, kind: OutputKind, no_color: bool) -> String {
+    let name = sanitize_for_display(name, std::io::stdout().is_terminal());
     match kind {
         OutputKind::File => format!("{}{name}", icon(no_color, FILE_ICON)),
         OutputKind::Directory(file_count) => {
@@ -98,6 +123,7 @@ fn format_compact_counts(count: &Count, args: &Args) -> String {
 }
 
 pub fn format_compact_output(name: &str, count: &Count, kind: OutputKind, args: &Args) -> String {
+    let name = sanitize_for_display(name, std::io::stdout().is_terminal());
     let header = match kind {
         OutputKind::File => format!("{name}:"),
         OutputKind::Directory(file_count) => {
@@ -133,10 +159,11 @@ fn format_single_count(count: &Count, args: &Args) -> String {
 }
 
 fn format_verbose_entry(entry: &FileEntry, args: &Args) -> String {
+    let path_str = entry.path.display().to_string();
     format!(
         "{}{}  {}",
         icon(args.no_color, FILE_ICON),
-        entry.path.display(),
+        sanitize_for_display(&path_str, std::io::stdout().is_terminal()),
         format_single_count(&entry.count, args)
     )
 }
@@ -278,6 +305,32 @@ mod tests {
             path: "file.txt".into(),
             count,
         }]
+    }
+
+    #[test]
+    fn sanitize_for_display_replaces_control_chars_when_terminal() {
+        // ESC (used by ANSI escape sequences) and a raw newline, both of
+        // which could manipulate or forge lines in a terminal (#81).
+        let name = "evil\x1b[31mred\x1b[0m\nname.txt";
+        let sanitized = sanitize_for_display(name, true);
+        assert!(!sanitized.contains('\x1b'));
+        assert!(!sanitized.contains('\n'));
+        assert!(sanitized.contains('\u{FFFD}'));
+    }
+
+    #[test]
+    fn sanitize_for_display_passes_through_when_not_a_terminal() {
+        // Piped/redirected output doesn't interpret escape codes, and JSON
+        // output escapes control characters separately (via serde) -- this
+        // sanitization is purely a terminal-display safeguard.
+        let name = "evil\x1b[31mname.txt";
+        assert_eq!(sanitize_for_display(name, false), name);
+    }
+
+    #[test]
+    fn sanitize_for_display_passes_through_clean_names_unchanged() {
+        let name = "ordinary_file.txt";
+        assert_eq!(sanitize_for_display(name, true), name);
     }
 
     #[test]

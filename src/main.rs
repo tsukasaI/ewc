@@ -1,5 +1,6 @@
 use clap::Parser;
 use std::io;
+use std::io::IsTerminal;
 use std::path::Path;
 use std::process;
 
@@ -9,8 +10,8 @@ use ewc::counter::{
 };
 use ewc::output::{
     format_compact_output, format_compact_total, format_json_multiple, format_json_single,
-    format_output, format_separator, format_total_output, format_verbose_output, JsonFileResult,
-    OutputKind,
+    format_output, format_separator, format_total_output, format_verbose_output,
+    sanitize_for_display, JsonFileResult, OutputKind,
 };
 
 const WARNING_ICON: &str = "\u{26A0}\u{FE0F}";
@@ -42,12 +43,27 @@ fn process_path(path: &Path, config: &FilterConfig) -> io::Result<ProcessResult>
     }
 }
 
-/// Prints one warning line per skipped entry, matching the existing
-/// top-level-failure style. Returns whether anything was skipped, so callers
-/// can fold it into the process's exit code.
+/// Prints a top-level "file/directory could not be processed" warning.
+fn warn_file_error(file: &Path, e: &io::Error) {
+    let is_tty = io::stderr().is_terminal();
+    eprintln!(
+        "{WARNING_ICON}  {}: {e}",
+        sanitize_for_display(&file.to_string_lossy(), is_tty)
+    );
+}
+
+/// Prints one warning line per skipped entry, matching warn_file_error's
+/// style. Returns whether anything was skipped, so callers can fold it
+/// into the process's exit code.
 fn report_skipped(skipped: &[SkippedEntry]) -> bool {
+    let is_tty = io::stderr().is_terminal();
     for entry in skipped {
-        eprintln!("{WARNING_ICON}  {}: {}", entry.path.display(), entry.error);
+        let path_str = entry.path.display().to_string();
+        eprintln!(
+            "{WARNING_ICON}  {}: {}",
+            sanitize_for_display(&path_str, is_tty),
+            entry.error
+        );
     }
     !skipped.is_empty()
 }
@@ -131,7 +147,7 @@ fn run_json_mode(args: &Args, config: &FilterConfig) {
         let result = match process_path(path, config) {
             Ok(result) => result,
             Err(e) => {
-                eprintln!("{WARNING_ICON}  {}: {e}", file.display());
+                warn_file_error(file, &e);
                 has_error = true;
                 continue;
             }
@@ -199,7 +215,7 @@ fn run_normal_mode(args: &Args, config: &FilterConfig) {
                     }
                 }
                 Err(e) => {
-                    eprintln!("{WARNING_ICON}  {}: {e}", file.display());
+                    warn_file_error(file, &e);
                     has_error = true;
                 }
             }
@@ -232,7 +248,7 @@ fn run_normal_mode(args: &Args, config: &FilterConfig) {
                     }
                 }
                 Err(e) => {
-                    eprintln!("{WARNING_ICON}  {}: {e}", file.display());
+                    warn_file_error(file, &e);
                     has_error = true;
                 }
             }

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- Filenames containing terminal control characters (e.g. an embedded ANSI escape sequence) no longer manipulate the terminal when printed. Control characters and DEL are replaced with U+FFFD in human-readable output when stdout/stderr is actually a terminal; piped/redirected output and `--json` (which already escapes control characters) are unaffected
+
 ### Fixed
 
 - `--compact` directory output no longer emits a double space after `(N files):` (files already used a single space; directories now match)
