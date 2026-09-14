@@ -74,6 +74,18 @@ fn create_filter_config(args: &Args) -> io::Result<FilterConfig> {
     FilterConfig::new(args.all, &args.exclude, &args.include)
 }
 
+/// Formats an invalid --exclude/--include glob-pattern error for stderr.
+/// The error's Display embeds the offending pattern (both this wrapper's
+/// own message and globset's inner echo of it), so it needs the same
+/// terminal sanitization as any other argument-derived output.
+fn filter_config_error_line(e: &io::Error, no_color: bool, is_tty: bool) -> String {
+    format!(
+        "{}{}",
+        icon(no_color, WARNING_ICON),
+        sanitize_for_display(&e.to_string(), is_tty)
+    )
+}
+
 /// Sanitizes every element of `argv` and re-parses it.
 ///
 /// Sanitizing argv and re-parsing, rather than sanitizing clap's
@@ -138,11 +150,7 @@ fn main() {
         Ok(config) => config,
         Err(e) => {
             let is_tty = io::stderr().is_terminal();
-            eprintln!(
-                "{}{}",
-                icon(args.no_color, WARNING_ICON),
-                sanitize_for_display(&e.to_string(), is_tty)
-            );
+            eprintln!("{}", filter_config_error_line(&e, args.no_color, is_tty));
             if args.json {
                 // Keep stdout valid JSON even on failure, matching
                 // run_json_mode's all-inputs-failed behavior.
@@ -358,11 +366,10 @@ mod tests {
 
     #[test]
     fn invalid_glob_pattern_error_is_sanitized() {
-        let config = FilterConfig::new(false, &["[\nerror: FORGED GLOB".to_string()], &[]);
-        let e = config.unwrap_err().to_string();
-        let sanitized = sanitize_for_display(&e, true);
-        assert!(!sanitized.contains('\n'));
-        assert!(sanitized.contains('\u{FFFD}'));
+        let e = FilterConfig::new(false, &["[\nerror: FORGED GLOB".to_string()], &[]).unwrap_err();
+        let line = filter_config_error_line(&e, false, true);
+        assert!(!line.contains('\n'));
+        assert!(line.contains('\u{FFFD}'));
     }
 
     #[test]
