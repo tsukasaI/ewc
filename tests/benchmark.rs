@@ -24,7 +24,7 @@ fn bench_wc(path: &str, runs: u32) -> std::time::Duration {
 fn bench_ewc(path: &str, runs: u32) -> std::time::Duration {
     let start = Instant::now();
     for _ in 0..runs {
-        Command::new("./target/release/ewc")
+        Command::new(env!("CARGO_BIN_EXE_ewc"))
             .arg(path)
             .output()
             .expect("failed to run ewc");

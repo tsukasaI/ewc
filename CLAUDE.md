@@ -27,12 +27,18 @@ Nix-specific requirement.
 - `cargo clippy -- -D warnings` — matches CI exactly
 - `cargo fmt` / `cargo fmt --check`
 
-**Nix sandbox constraint**: `nix build` / the flake's `cargoTestFlags = [
-"--lib" ]` skip integration tests (`tests/integration.rs`) because the
-sandbox has no filesystem access for them; unit tests (in `src/`) still run.
-Commit `06c8454` ("fix(nix): skip integration tests in sandbox
-environment") added this. Run `cargo test` directly (outside `nix build`)
-to exercise integration tests.
+**Nix sandbox constraint**: commit `06c8454` added `cargoTestFlags = [
+"--lib" ]` on the diagnosis that the sandbox lacks filesystem access for
+integration tests. That diagnosis was wrong (#62): the surviving `--lib`
+unit tests already use `tempfile`/`std::fs` freely and pass sandboxed. The
+real cause was `buildRustPackage`'s default release profile producing
+`target/release/ewc`, while `tests/integration.rs` looked for a hardcoded
+`./target/debug/ewc`, a path plain `cargo test` happens to satisfy, masking
+the bug. Both `tests/integration.rs` and `tests/benchmark.rs` now use
+`env!("CARGO_BIN_EXE_ewc")` instead (#62, #63), and the `cargoTestFlags`
+skip was removed. Not verified with an actual `nix build` from this
+session: its build sandbox couldn't reach crates.io through this
+environment's network proxy, a local limitation, not a code issue.
 
 ## Source of truth
 
