@@ -5,8 +5,7 @@ use std::process;
 
 use ewc::cli::Args;
 use ewc::counter::{
-    count_directory, count_directory_detailed, count_file, count_from_reader, Count, FilterConfig,
-    SkippedEntry,
+    count_directory_detailed, count_file, count_from_reader, Count, FilterConfig, SkippedEntry,
 };
 use ewc::output::{
     format_compact_output, format_compact_total, format_json_multiple, format_json_single,
@@ -25,10 +24,10 @@ struct ProcessResult {
 
 fn process_path(path: &Path, config: &FilterConfig) -> io::Result<ProcessResult> {
     if path.is_dir() {
-        let (count, file_count, skipped) = count_directory(path, config)?;
+        let (entries, count, skipped) = count_directory_detailed(path, config)?;
         Ok(ProcessResult {
             count,
-            file_count,
+            file_count: entries.len(),
             skipped,
             is_directory: true,
         })
@@ -102,8 +101,7 @@ fn run_stdin_mode(args: &Args) {
         let result = JsonFileResult {
             name: "<stdin>".to_string(),
             count,
-            is_directory: false,
-            file_count: None,
+            kind: OutputKind::File,
         };
         println!("{}", format_json_single(&result));
     } else if args.compact {
@@ -139,11 +137,15 @@ fn run_json_mode(args: &Args, config: &FilterConfig) {
             has_error = true;
         }
 
+        let kind = if result.is_directory {
+            OutputKind::Directory(result.file_count)
+        } else {
+            OutputKind::File
+        };
         results.push(JsonFileResult {
             name: file.clone(),
             count: result.count,
-            is_directory: result.is_directory,
-            file_count: result.is_directory.then_some(result.file_count),
+            kind,
         });
         total_count += result.count;
     }

@@ -331,14 +331,6 @@ fn walk_directory(
     Ok((entries, skipped))
 }
 
-pub fn count_directory(
-    path: &Path,
-    config: &FilterConfig,
-) -> io::Result<(Count, usize, Vec<SkippedEntry>)> {
-    let (entries, total, skipped) = count_directory_detailed(path, config)?;
-    Ok((total, entries.len(), skipped))
-}
-
 pub fn count_directory_detailed(
     path: &Path,
     config: &FilterConfig,
@@ -382,6 +374,19 @@ pub fn count_directory_detailed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Test-only fixture: production code only ever needs the full
+    // Vec<FileEntry> from count_directory_detailed (main.rs derives
+    // file_count from entries.len() itself), but most tests below only
+    // care about the aggregate count/file_count/skipped, so this trims
+    // count_directory_detailed's result down to that shape.
+    fn count_directory(
+        path: &Path,
+        config: &FilterConfig,
+    ) -> io::Result<(Count, usize, Vec<SkippedEntry>)> {
+        let (entries, total, skipped) = count_directory_detailed(path, config)?;
+        Ok((total, entries.len(), skipped))
+    }
 
     #[test]
     fn count_empty_string() {
