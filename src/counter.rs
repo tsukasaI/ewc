@@ -152,24 +152,32 @@ impl Sum for Count {
     }
 }
 
-#[derive(Debug, Default, Clone)]
 pub struct FilterConfig {
     pub include_hidden: bool,
-    pub exclude_patterns: Vec<String>,
-    pub include_patterns: Vec<String>,
+    exclude_set: GlobSet,
+    include_set: GlobSet,
+    has_include_patterns: bool,
+}
+
+impl Default for FilterConfig {
+    fn default() -> Self {
+        // Empty pattern lists can never fail to compile.
+        Self::new(false, &[], &[]).expect("empty glob pattern list is always valid")
+    }
 }
 
 impl FilterConfig {
     pub fn new(
         include_hidden: bool,
-        exclude_patterns: Vec<String>,
-        include_patterns: Vec<String>,
-    ) -> Self {
-        Self {
+        exclude_patterns: &[String],
+        include_patterns: &[String],
+    ) -> io::Result<Self> {
+        Ok(Self {
             include_hidden,
-            exclude_patterns,
-            include_patterns,
-        }
+            exclude_set: Self::build_globset(exclude_patterns)?,
+            include_set: Self::build_globset(include_patterns)?,
+            has_include_patterns: !include_patterns.is_empty(),
+        })
     }
 
     fn build_globset(patterns: &[String]) -> io::Result<GlobSet> {
@@ -231,24 +239,47 @@ fn matches_glob(glob_set: &GlobSet, relative_path: &Path) -> bool {
     glob_set.is_match(&*path_str) || glob_set.is_match(relative_path)
 }
 
-// Symlinks inside a scanned directory are intentionally not followed:
-// walkdir does not follow them by default, and this matches classic `wc`'s
-// behavior of only counting regular files it walks into directly.
+// A directory entry is pruned from the walk (not just its own file list, but
+// everything beneath it) when its path matches an exclude pattern. Patterns
+// like "target/*" don't match the literal string "target", so the directory
+// path is also tested with a trailing separator appended, letting a
+// zero-or-more "*" segment match the (otherwise absent) contents portion.
+fn is_excluded_dir(relative_path: &Path, exclude_set: &GlobSet) -> bool {
+    if matches_glob(exclude_set, relative_path) {
+        return true;
+    }
+    let mut dir_str = relative_path.to_string_lossy().into_owned();
+    dir_str.push('/');
+    exclude_set.is_match(&dir_str)
+}
+
+// Symlinks inside a scanned directory are intentionally not followed (walkdir
+// does not follow them by default): following them risks infinite loops on a
+// cyclic symlink and double-counting a file reachable by more than one path.
+// A broken symlink is still reported as a skipped entry, since that reflects
+// a real I/O condition rather than the not-following policy.
 fn walk_directory(
     path: &Path,
     config: &FilterConfig,
 ) -> io::Result<(Vec<PathBuf>, Vec<SkippedEntry>)> {
-    let exclude_set = FilterConfig::build_globset(&config.exclude_patterns)?;
-    let include_set = FilterConfig::build_globset(&config.include_patterns)?;
-    let has_include_patterns = !config.include_patterns.is_empty();
-
     let mut entries = Vec::new();
     let mut skipped = Vec::new();
 
-    for entry in WalkDir::new(path)
-        .into_iter()
-        .filter_entry(|e| e.depth() == 0 || config.include_hidden || !is_hidden(e))
-    {
+    for entry in WalkDir::new(path).into_iter().filter_entry(|e| {
+        if e.depth() == 0 {
+            return true;
+        }
+        if !config.include_hidden && is_hidden(e) {
+            return false;
+        }
+        if e.file_type().is_dir() {
+            let relative_path = e.path().strip_prefix(path).unwrap_or(e.path());
+            if is_excluded_dir(relative_path, &config.exclude_set) {
+                return false;
+            }
+        }
+        true
+    }) {
         let entry = match entry {
             Ok(entry) => entry,
             Err(e) => {
@@ -270,6 +301,16 @@ fn walk_directory(
             }
         };
 
+        if entry.file_type().is_symlink() {
+            if let Err(e) = fs::metadata(entry.path()) {
+                skipped.push(SkippedEntry {
+                    path: entry.path().to_path_buf(),
+                    error: e.to_string(),
+                });
+            }
+            continue;
+        }
+
         if !entry.file_type().is_file() {
             continue;
         }
@@ -277,10 +318,10 @@ fn walk_directory(
         let file_path = entry.path();
         let relative_path = file_path.strip_prefix(path).unwrap_or(file_path);
 
-        if matches_glob(&exclude_set, relative_path) {
+        if matches_glob(&config.exclude_set, relative_path) {
             continue;
         }
-        if has_include_patterns && !matches_glob(&include_set, relative_path) {
+        if config.has_include_patterns && !matches_glob(&config.include_set, relative_path) {
             continue;
         }
 
@@ -596,7 +637,7 @@ mod tests {
     }
 
     fn config_with_hidden() -> FilterConfig {
-        FilterConfig::new(true, vec![], vec![])
+        FilterConfig::new(true, &[], &[]).unwrap()
     }
 
     #[test]
@@ -905,7 +946,7 @@ mod tests {
         std::fs::write(dir.path().join("file.md"), "markdown\n").unwrap();
         std::fs::write(dir.path().join("file.txt"), "text\n").unwrap();
 
-        let config = FilterConfig::new(false, vec!["*.md".to_string()], vec![]);
+        let config = FilterConfig::new(false, &["*.md".to_string()], &[]).unwrap();
         let result = count_directory(dir.path(), &config);
         assert!(result.is_ok());
         let (count, file_count, skipped) = result.unwrap();
@@ -922,7 +963,7 @@ mod tests {
         std::fs::write(dir.path().join("file.md"), "markdown\n").unwrap();
         std::fs::write(dir.path().join("file.txt"), "text\n").unwrap();
 
-        let config = FilterConfig::new(false, vec![], vec!["*.rs".to_string()]);
+        let config = FilterConfig::new(false, &[], &["*.rs".to_string()]).unwrap();
         let result = count_directory(dir.path(), &config);
         assert!(result.is_ok());
         let (count, file_count, skipped) = result.unwrap();
@@ -941,11 +982,8 @@ mod tests {
         std::fs::write(dir.path().join("file.txt"), "text\n").unwrap();
 
         // Include only .rs files, but exclude test_*.rs
-        let config = FilterConfig::new(
-            false,
-            vec!["test_*.rs".to_string()],
-            vec!["*.rs".to_string()],
-        );
+        let config =
+            FilterConfig::new(false, &["test_*.rs".to_string()], &["*.rs".to_string()]).unwrap();
         let result = count_directory(dir.path(), &config);
         assert!(result.is_ok());
         let (count, file_count, skipped) = result.unwrap();
@@ -964,13 +1002,90 @@ mod tests {
         std::fs::create_dir(&subdir).unwrap();
         std::fs::write(subdir.join("build.txt"), "build\n").unwrap();
 
-        let config = FilterConfig::new(false, vec!["target/*".to_string()], vec![]);
+        let config = FilterConfig::new(false, &["target/*".to_string()], &[]).unwrap();
         let result = count_directory(dir.path(), &config);
         assert!(result.is_ok());
         let (count, file_count, skipped) = result.unwrap();
         assert!(skipped.is_empty());
         assert_eq!(file_count, 1); // Only root.txt
         assert_eq!(count.words, 1); // "root"
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn count_directory_exclude_prunes_walk_into_unreadable_subdir() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("root.txt"), "root\n").unwrap();
+
+        // An unreadable directory under the excluded prefix would otherwise
+        // surface as a skipped entry if the walk descended into it; pruning
+        // the excluded directory before descending must avoid that (#70).
+        let target = dir.path().join("target");
+        std::fs::create_dir(&target).unwrap();
+        let locked = target.join("locked");
+        std::fs::create_dir(&locked).unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let config = FilterConfig::new(false, &["target/*".to_string()], &[]).unwrap();
+        let result = count_directory(dir.path(), &config);
+        let restore = || {
+            let _ = std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755));
+        };
+
+        let (count, file_count, skipped) = match result {
+            Ok(v) => v,
+            Err(e) => {
+                restore();
+                panic!("count_directory failed: {e}");
+            }
+        };
+        restore();
+
+        assert!(skipped.is_empty());
+        assert_eq!(file_count, 1);
+        assert_eq!(count.words, 1);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn count_directory_reports_broken_symlink_as_skipped() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("root.txt"), "root\n").unwrap();
+
+        let broken_link = dir.path().join("dangling");
+        symlink(dir.path().join("does_not_exist"), &broken_link).unwrap();
+
+        let (count, file_count, skipped) = count_directory(dir.path(), &default_config()).unwrap();
+
+        assert_eq!(file_count, 1);
+        assert_eq!(count.words, 1);
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].path, broken_link);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn count_directory_silently_skips_valid_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("root.txt");
+        std::fs::write(&target, "root\n").unwrap();
+
+        let link = dir.path().join("link.txt");
+        symlink(&target, &link).unwrap();
+
+        let (count, file_count, skipped) = count_directory(dir.path(), &default_config()).unwrap();
+
+        // The symlink is not followed and not reported: it points to a real
+        // file, so this is the not-following policy, not an I/O failure.
+        assert!(skipped.is_empty());
+        assert_eq!(file_count, 1);
+        assert_eq!(count.words, 1);
     }
 
     #[test]
@@ -982,11 +1097,8 @@ mod tests {
         std::fs::write(dir.path().join("file.txt"), "text\n").unwrap();
         std::fs::write(dir.path().join("Cargo.lock"), "lock\n").unwrap();
 
-        let config = FilterConfig::new(
-            false,
-            vec!["*.md".to_string(), "*.lock".to_string()],
-            vec![],
-        );
+        let config =
+            FilterConfig::new(false, &["*.md".to_string(), "*.lock".to_string()], &[]).unwrap();
         let result = count_directory(dir.path(), &config);
         assert!(result.is_ok());
         let (count, file_count, skipped) = result.unwrap();

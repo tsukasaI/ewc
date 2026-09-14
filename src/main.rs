@@ -20,6 +20,7 @@ struct ProcessResult {
     count: Count,
     file_count: usize,
     skipped: Vec<SkippedEntry>,
+    is_directory: bool,
 }
 
 fn process_path(path: &Path, config: &FilterConfig) -> io::Result<ProcessResult> {
@@ -29,6 +30,7 @@ fn process_path(path: &Path, config: &FilterConfig) -> io::Result<ProcessResult>
             count,
             file_count,
             skipped,
+            is_directory: true,
         })
     } else {
         let count = count_file(path)?;
@@ -36,6 +38,7 @@ fn process_path(path: &Path, config: &FilterConfig) -> io::Result<ProcessResult>
             count,
             file_count: 1,
             skipped: Vec::new(),
+            is_directory: false,
         })
     }
 }
@@ -50,8 +53,8 @@ fn report_skipped(skipped: &[SkippedEntry]) -> bool {
     !skipped.is_empty()
 }
 
-fn create_filter_config(args: &Args) -> FilterConfig {
-    FilterConfig::new(args.all, args.exclude.clone(), args.include.clone())
+fn create_filter_config(args: &Args) -> io::Result<FilterConfig> {
+    FilterConfig::new(args.all, &args.exclude, &args.include)
 }
 
 fn main() {
@@ -105,7 +108,14 @@ fn run_json_mode(args: &Args) {
     let mut results: Vec<JsonFileResult> = Vec::new();
     let mut total_count = Count::default();
     let mut has_error = false;
-    let config = create_filter_config(args);
+    let config = match create_filter_config(args) {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!("{WARNING_ICON}  {e}");
+            println!("{}", format_json_multiple(&[], &Count::default()));
+            process::exit(1);
+        }
+    };
 
     for file in &args.files {
         let path = Path::new(file);
@@ -122,12 +132,11 @@ fn run_json_mode(args: &Args) {
             has_error = true;
         }
 
-        let is_directory = path.is_dir();
         results.push(JsonFileResult {
             name: file.clone(),
             count: result.count,
-            is_directory,
-            file_count: is_directory.then_some(result.file_count),
+            is_directory: result.is_directory,
+            file_count: result.is_directory.then_some(result.file_count),
         });
         total_count += result.count;
     }
@@ -154,7 +163,13 @@ fn run_normal_mode(args: &Args) {
     let mut total_file_count = 0;
     let mut successful_args = 0;
     let file_count = args.files.len();
-    let config = create_filter_config(args);
+    let config = match create_filter_config(args) {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!("{WARNING_ICON}  {e}");
+            process::exit(1);
+        }
+    };
 
     for (index, file) in args.files.iter().enumerate() {
         let path = Path::new(file);
@@ -185,7 +200,7 @@ fn run_normal_mode(args: &Args) {
         } else {
             match process_path(path, &config) {
                 Ok(result) => {
-                    let kind = if path.is_dir() {
+                    let kind = if result.is_directory {
                         OutputKind::Directory(result.file_count)
                     } else {
                         OutputKind::File
