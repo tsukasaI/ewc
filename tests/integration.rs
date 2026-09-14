@@ -220,6 +220,15 @@ fn no_color_flag_removes_icons() {
 }
 
 #[test]
+fn no_color_flag_removes_warning_icon() {
+    let result = run_ewc(&["--no-color", "nonexistent.txt"]);
+
+    assert!(!result.success);
+    assert!(result.stderr.contains("nonexistent.txt"));
+    assert!(!result.stderr.contains('\u{26A0}'));
+}
+
+#[test]
 fn no_color_flag_directory() {
     let dir = create_test_dir();
     let result = run_ewc(&["--no-color", dir.path().to_str().unwrap()]);
