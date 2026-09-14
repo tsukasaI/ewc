@@ -220,6 +220,44 @@ fn no_color_flag_removes_icons() {
 }
 
 #[test]
+fn no_color_flag_removes_warning_icon() {
+    let result = run_ewc(&["--no-color", "nonexistent.txt"]);
+
+    assert!(!result.success);
+    assert!(result.stderr.contains("nonexistent.txt"));
+    assert!(!result.stderr.contains('\u{26A0}'));
+}
+
+#[test]
+fn no_color_flag_removes_warning_icon_on_invalid_glob() {
+    let result = run_ewc(&["--no-color", "--exclude", "[", "nonexistent.txt"]);
+
+    assert!(!result.success);
+    assert!(!result.stderr.contains('\u{26A0}'));
+}
+
+#[test]
+#[cfg(unix)]
+fn no_color_flag_removes_warning_icon_on_skipped_entry() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let unreadable = dir.path().join("unreadable.txt");
+    std::fs::write(&unreadable, "secret\n").unwrap();
+    std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    let result = run_ewc(&["--no-color", dir.path().to_str().unwrap()]);
+
+    let _ = std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o644));
+
+    if result.success {
+        // Running as root bypasses permission checks; nothing to assert.
+        return;
+    }
+    assert!(!result.stderr.contains('\u{26A0}'));
+}
+
+#[test]
 fn no_color_flag_directory() {
     let dir = create_test_dir();
     let result = run_ewc(&["--no-color", dir.path().to_str().unwrap()]);
