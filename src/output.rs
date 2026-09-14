@@ -116,12 +116,18 @@ pub fn format_compact_total(file_count: usize, count: &Count, args: &Args) -> St
     )
 }
 
+/// First-enabled-metric lookup for verbose mode's one-metric-per-line
+/// display. Lines must stay before words/bytes (so the flagless default
+/// shows lines) and max must stay last (so `-l -L` shows lines, not max).
 fn format_single_count(count: &Count, args: &Args) -> String {
-    let (value, unit) = match (args.lines, args.words, args.bytes, args.max_line_length) {
-        (false, true, false, false) => (count.words, "words"),
-        (false, false, true, false) => (count.bytes, "bytes"),
-        (false, false, false, true) => (count.max_line_length, "max"),
-        _ => (count.lines, "lines"),
+    let (value, unit) = if args.show_lines() {
+        (count.lines, "lines")
+    } else if args.show_words() {
+        (count.words, "words")
+    } else if args.show_bytes() {
+        (count.bytes, "bytes")
+    } else {
+        (count.max_line_length, "max")
     };
     format!("{} {unit}", format_number(value))
 }
@@ -266,6 +272,55 @@ pub fn format_total_output(file_count: usize, count: &Count, args: &Args) -> Str
 mod tests {
     use super::*;
     use crate::cli::default_args;
+
+    fn single_entry(count: Count) -> Vec<FileEntry> {
+        vec![FileEntry {
+            path: "file.txt".into(),
+            count,
+        }]
+    }
+
+    #[test]
+    fn verbose_single_metric_uses_args_show_helpers() {
+        // Regression test for #53.
+        let count = Count {
+            lines: 1,
+            words: 2,
+            bytes: 3,
+            max_line_length: 4,
+        };
+        let entries = single_entry(count);
+
+        // -w -c (no -l): must show the first requested metric (words), not
+        // fall back to lines.
+        let args = Args {
+            words: true,
+            bytes: true,
+            ..default_args()
+        };
+        let output = format_verbose_output(&entries, &count, &args);
+        assert!(output.contains("2 words"));
+        assert!(!output.contains("1 lines"));
+
+        // -L alone: must show max, not fall back to lines.
+        let args = Args {
+            max_line_length: true,
+            ..default_args()
+        };
+        let output = format_verbose_output(&entries, &count, &args);
+        assert!(output.contains("4 max"));
+        assert!(!output.contains("1 lines"));
+
+        // -l -L: lines wins even though max is also requested.
+        let args = Args {
+            lines: true,
+            max_line_length: true,
+            ..default_args()
+        };
+        let output = format_verbose_output(&entries, &count, &args);
+        assert!(output.contains("1 lines"));
+        assert!(!output.contains("4 max"));
+    }
 
     #[test]
     fn format_number_without_comma() {
