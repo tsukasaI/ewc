@@ -2,6 +2,7 @@ use crate::cli::Args;
 use crate::counter::{Count, FileEntry};
 use serde::Serialize;
 
+#[derive(Clone, Copy)]
 pub enum OutputKind {
     File,
     Directory(usize),
@@ -152,8 +153,7 @@ pub fn format_verbose_output(entries: &[FileEntry], total: &Count, args: &Args) 
 pub struct JsonFileResult {
     pub name: String,
     pub count: Count,
-    pub is_directory: bool,
-    pub file_count: Option<usize>,
+    pub kind: OutputKind,
 }
 
 #[derive(Serialize)]
@@ -199,23 +199,22 @@ struct JsonMultiple<'a> {
 
 fn json_entry(result: &JsonFileResult) -> JsonEntry<'_> {
     let count = &result.count;
-    if result.is_directory {
-        JsonEntry::Directory(JsonDirectory {
+    match result.kind {
+        OutputKind::Directory(file_count) => JsonEntry::Directory(JsonDirectory {
             directory: &result.name,
-            file_count: result.file_count.unwrap_or(0),
+            file_count,
             max_line_length: count.max_line_length,
             lines: count.lines,
             words: count.words,
             bytes: count.bytes,
-        })
-    } else {
-        JsonEntry::File(JsonFile {
+        }),
+        OutputKind::File => JsonEntry::File(JsonFile {
             file: &result.name,
             max_line_length: count.max_line_length,
             lines: count.lines,
             words: count.words,
             bytes: count.bytes,
-        })
+        }),
     }
 }
 
@@ -225,7 +224,13 @@ pub fn format_json_single(result: &JsonFileResult) -> String {
 
 pub fn format_json_multiple(results: &[JsonFileResult], total: &Count) -> String {
     let files: Vec<JsonEntry> = results.iter().map(json_entry).collect();
-    let total_file_count: usize = results.iter().map(|r| r.file_count.unwrap_or(1)).sum();
+    let total_file_count: usize = results
+        .iter()
+        .map(|r| match r.kind {
+            OutputKind::File => 1,
+            OutputKind::Directory(file_count) => file_count,
+        })
+        .sum();
 
     let payload = JsonMultiple {
         files,
@@ -580,8 +585,7 @@ mod tests {
         let result = JsonFileResult {
             name,
             count: Count::default(),
-            is_directory: false,
-            file_count: None,
+            kind: OutputKind::File,
         };
 
         let json = format_json_single(&result);
@@ -605,8 +609,7 @@ mod tests {
                 bytes: 1500,
                 max_line_length: 120,
             },
-            is_directory: false,
-            file_count: None,
+            kind: OutputKind::File,
         };
 
         let json = format_json_single(&result);
@@ -626,8 +629,7 @@ mod tests {
                 bytes: 300,
                 max_line_length: 20,
             },
-            is_directory: true,
-            file_count: Some(3),
+            kind: OutputKind::Directory(3),
         };
 
         let json = format_json_single(&result);
@@ -649,8 +651,7 @@ mod tests {
                     bytes: 10,
                     max_line_length: 5,
                 },
-                is_directory: false,
-                file_count: None,
+                kind: OutputKind::File,
             },
             JsonFileResult {
                 name: "dir".to_string(),
@@ -660,8 +661,7 @@ mod tests {
                     bytes: 20,
                     max_line_length: 8,
                 },
-                is_directory: true,
-                file_count: Some(2),
+                kind: OutputKind::Directory(2),
             },
         ];
         let total = Count {
