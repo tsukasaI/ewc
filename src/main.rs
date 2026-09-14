@@ -20,6 +20,7 @@ struct ProcessResult {
     count: Count,
     file_count: usize,
     skipped: Vec<SkippedEntry>,
+    is_directory: bool,
 }
 
 fn process_path(path: &Path, config: &FilterConfig) -> io::Result<ProcessResult> {
@@ -29,6 +30,7 @@ fn process_path(path: &Path, config: &FilterConfig) -> io::Result<ProcessResult>
             count,
             file_count,
             skipped,
+            is_directory: true,
         })
     } else {
         let count = count_file(path)?;
@@ -36,6 +38,7 @@ fn process_path(path: &Path, config: &FilterConfig) -> io::Result<ProcessResult>
             count,
             file_count: 1,
             skipped: Vec::new(),
+            is_directory: false,
         })
     }
 }
@@ -50,19 +53,34 @@ fn report_skipped(skipped: &[SkippedEntry]) -> bool {
     !skipped.is_empty()
 }
 
-fn create_filter_config(args: &Args) -> FilterConfig {
-    FilterConfig::new(args.all, args.exclude.clone(), args.include.clone())
+fn create_filter_config(args: &Args) -> io::Result<FilterConfig> {
+    FilterConfig::new(args.all, &args.exclude, &args.include)
 }
 
 fn main() {
     let args = Args::parse();
 
+    // Built once, before mode dispatch, so an invalid --exclude/--include
+    // pattern is caught even in stdin mode instead of being silently ignored.
+    let config = match create_filter_config(&args) {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!("{WARNING_ICON}  {e}");
+            if args.json {
+                // Keep stdout valid JSON even on failure, matching
+                // run_json_mode's all-inputs-failed behavior.
+                println!("{}", format_json_multiple(&[], &Count::default()));
+            }
+            process::exit(1);
+        }
+    };
+
     if args.files.is_empty() {
         run_stdin_mode(&args);
     } else if args.json {
-        run_json_mode(&args);
+        run_json_mode(&args, &config);
     } else {
-        run_normal_mode(&args);
+        run_normal_mode(&args, &config);
     }
 }
 
@@ -101,15 +119,14 @@ fn run_stdin_mode(args: &Args) {
     }
 }
 
-fn run_json_mode(args: &Args) {
+fn run_json_mode(args: &Args, config: &FilterConfig) {
     let mut results: Vec<JsonFileResult> = Vec::new();
     let mut total_count = Count::default();
     let mut has_error = false;
-    let config = create_filter_config(args);
 
     for file in &args.files {
         let path = Path::new(file);
-        let result = match process_path(path, &config) {
+        let result = match process_path(path, config) {
             Ok(result) => result,
             Err(e) => {
                 eprintln!("{WARNING_ICON}  {file}: {e}");
@@ -122,12 +139,11 @@ fn run_json_mode(args: &Args) {
             has_error = true;
         }
 
-        let is_directory = path.is_dir();
         results.push(JsonFileResult {
             name: file.clone(),
             count: result.count,
-            is_directory,
-            file_count: is_directory.then_some(result.file_count),
+            is_directory: result.is_directory,
+            file_count: result.is_directory.then_some(result.file_count),
         });
         total_count += result.count;
     }
@@ -148,20 +164,19 @@ fn run_json_mode(args: &Args) {
     }
 }
 
-fn run_normal_mode(args: &Args) {
+fn run_normal_mode(args: &Args, config: &FilterConfig) {
     let mut has_error = false;
     let mut total_count = Count::default();
     let mut total_file_count = 0;
     let mut successful_args = 0;
     let file_count = args.files.len();
-    let config = create_filter_config(args);
 
     for (index, file) in args.files.iter().enumerate() {
         let path = Path::new(file);
         let is_last = index == file_count - 1;
 
         if path.is_dir() && args.verbose {
-            match count_directory_detailed(path, &config) {
+            match count_directory_detailed(path, config) {
                 Ok((entries, dir_total, skipped)) => {
                     println!("{}", format_verbose_output(&entries, &dir_total, args));
 
@@ -183,9 +198,9 @@ fn run_normal_mode(args: &Args) {
                 }
             }
         } else {
-            match process_path(path, &config) {
+            match process_path(path, config) {
                 Ok(result) => {
-                    let kind = if path.is_dir() {
+                    let kind = if result.is_directory {
                         OutputKind::Directory(result.file_count)
                     } else {
                         OutputKind::File

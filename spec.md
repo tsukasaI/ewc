@@ -97,11 +97,12 @@ $ ewc -a src/       # Include all
 - Symlinks encountered while walking a directory are not followed, to
   avoid infinite loops on a cyclic symlink and double-counting a file
   reachable by more than one path
-- Currently, every symlink (valid or broken) is silently skipped: not
-  counted, not reported. A pending fix (#79) will report a broken symlink
-  as a skipped entry instead, since that reflects a real I/O condition
-  rather than the not-following policy; a symlink to a file/directory that
-  exists will keep being silently skipped once that lands
+- A symlink pointing at an existing file or directory is silently skipped
+  (not counted, not reported)
+- A broken symlink (pointing at a path that no longer exists) is reported
+  as a skipped entry, the same as any other I/O failure during the walk,
+  unless it's filtered out by `--exclude`/`--include` first, in which case
+  it's silently skipped like any other excluded path
 
 ### Error Handling
 
@@ -240,7 +241,7 @@ file.txt: max:120
 
 ### Exclude/Include Patterns
 
-The `--exclude` and `--include` options filter files during directory traversal using glob patterns.
+The `--exclude` and `--include` options filter files during directory traversal using glob patterns. `--exclude` also prunes a matching directory from the walk entirely (it is not just filtered out afterward); `--include` only filters files, so it can never prune a directory `--exclude` didn't already prune.
 
 #### Behavior
 
@@ -248,6 +249,11 @@ The `--exclude` and `--include` options filter files during directory traversal 
 - `--exclude` takes precedence over `--include`
 - Multiple patterns can be specified (options are repeatable)
 - Patterns match against relative paths from the walk root
+- A pattern that matches a directory's path relative to the walk root
+  (e.g. `--exclude target` for a top-level `target/`, or
+  `--exclude "**/target"` for one at any depth) prunes that directory and
+  everything under it from the walk, rather than only filtering files
+  one at a time
 - `*` crosses path separators the same as `**` does (no
   `literal_separator` distinction): `--exclude "*.md"` also removes
   `sub/dir/file.md`, not just top-level `.md` files
