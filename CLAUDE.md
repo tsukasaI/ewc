@@ -27,12 +27,20 @@ Nix-specific requirement.
 - `cargo clippy -- -D warnings` — matches CI exactly
 - `cargo fmt` / `cargo fmt --check`
 
-**Nix sandbox constraint**: `nix build` / the flake's `cargoTestFlags = [
-"--lib" ]` skip integration tests (`tests/integration.rs`) because the
-sandbox has no filesystem access for them; unit tests (in `src/`) still run.
-Commit `06c8454` ("fix(nix): skip integration tests in sandbox
-environment") added this. Run `cargo test` directly (outside `nix build`)
-to exercise integration tests.
+**Nix build and integration tests**: commit `06c8454` added
+`cargoTestFlags = [ "--lib" ]` on the diagnosis that the sandbox lacks
+filesystem access for integration tests. That diagnosis was wrong (#62):
+the surviving `--lib` unit tests already use `tempfile`/`std::fs` freely
+and pass sandboxed (observed locally, not CI-checked; no workflow runs
+`nix build`). The real cause was that `buildRustPackage` runs `cargo test
+--profile release --target <triple>`, landing the binary at
+`target/<triple>/release/ewc`, while `tests/integration.rs` looked for a
+hardcoded `./target/debug/ewc` (neither that nor a bare
+`./target/release/ewc` would have matched); plain `cargo test` happens to
+produce the exact `./target/debug/ewc` path, masking the bug. Both
+`tests/integration.rs` and `tests/benchmark.rs` now use
+`env!("CARGO_BIN_EXE_ewc")` instead (#62, #63), and the `cargoTestFlags`
+skip was removed.
 
 ## Source of truth
 
@@ -75,3 +83,6 @@ if either changes.
   line reference above will drift once PRs touching that file merge
   (several are in flight as of this writing); re-check it rather than
   trusting the number.
+- Integration tests under `nix build` have not actually been verified
+  since the `--lib` skip was removed (#62): run `nix build` and confirm
+  `tests/integration.rs` appears in the checkPhase log.
