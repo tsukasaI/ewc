@@ -123,6 +123,19 @@ The warning goes to stderr and the file block to stdout; the blank line
 above is only a formatting convenience in this doc, not something the
 program guarantees between the two streams.
 
+### Filenames With Control Characters
+
+A filename containing a control character (e.g. an embedded ANSI escape
+sequence, or its single-byte C1 equivalent) is displayed with those
+characters replaced by U+FFFD when stdout/stderr is an actual terminal,
+so it can't manipulate the terminal (move the cursor, forge extra lines,
+change colors, etc.) when printed. This also applies to `clap`'s own
+argument-parsing error messages, which can otherwise echo an
+argument-turned-filename back verbatim. Piped or redirected output, and
+`--json` (whose control-character escaping only covers C0 and is a JSON
+encoding concern, not a terminal-safety one), pass the raw name through
+unmodified.
+
 ### Standard Input
 
 When no arguments are provided, or the sole argument is `-`, reads from

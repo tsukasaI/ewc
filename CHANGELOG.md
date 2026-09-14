@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- Filenames containing terminal control characters (e.g. an embedded ANSI escape sequence, or its single-byte C1 form) no longer manipulate the terminal when printed. C0/C1 control characters and DEL are replaced with U+FFFD in human-readable output, including clap's own argument-parsing error messages, when stdout/stderr is actually a terminal; piped/redirected output and `--json` (which escapes only C0 control characters, a JSON-validity concern rather than a terminal-safety one) are unaffected
+
 ### Fixed
 
 - `--compact` directory output no longer emits a double space after `(N files):` (files already used a single space; directories now match)

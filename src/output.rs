@@ -1,11 +1,36 @@
 use crate::cli::Args;
 use crate::counter::{Count, FileEntry};
 use serde::Serialize;
+use std::borrow::Cow;
 
 #[derive(Clone, Copy)]
 pub enum OutputKind {
     File,
     Directory(usize),
+}
+
+/// Replaces C0 and C1 control characters and DEL with the Unicode
+/// replacement character, so a filename containing an embedded terminal
+/// escape sequence can't manipulate the terminal when printed. Callers pass
+/// whether the destination stream is actually a terminal: a piped or
+/// redirected stream doesn't interpret escape codes, so there's nothing to
+/// guard there, and JSON output escapes only C0 control characters via
+/// serde (a JSON-validity concern, not a terminal-safety one) regardless
+/// of this function.
+pub fn sanitize_for_display(name: &str, is_terminal: bool) -> Cow<'_, str> {
+    // char::is_control() is exactly Unicode Cc: C0 (0x00-0x1F), DEL (0x7F),
+    // and C1 (0x80-0x9F). C1 matters here as much as C0 does -- U+009B and
+    // U+009D are the single-byte forms of CSI and OSC, and some terminals
+    // (including xterm's UTF-8 C1 handling) execute them the same as the
+    // two-byte ESC-prefixed sequences.
+    if !is_terminal || name.chars().all(|c| !c.is_control()) {
+        return Cow::Borrowed(name);
+    }
+    Cow::Owned(
+        name.chars()
+            .map(|c| if c.is_control() { '\u{FFFD}' } else { c })
+            .collect(),
+    )
 }
 
 pub fn format_number(n: u64) -> String {
@@ -57,7 +82,8 @@ pub fn icon(no_color: bool, glyph: &'static str) -> &'static str {
     }
 }
 
-fn format_header(name: &str, kind: OutputKind, no_color: bool) -> String {
+fn format_header(name: &str, kind: OutputKind, no_color: bool, is_terminal: bool) -> String {
+    let name = sanitize_for_display(name, is_terminal);
     match kind {
         OutputKind::File => format!("{}{name}", icon(no_color, FILE_ICON)),
         OutputKind::Directory(file_count) => {
@@ -70,8 +96,14 @@ fn format_header(name: &str, kind: OutputKind, no_color: bool) -> String {
     }
 }
 
-pub fn format_output(name: &str, count: &Count, kind: OutputKind, args: &Args) -> String {
-    let mut output = vec![format_header(name, kind, args.no_color)];
+pub fn format_output(
+    name: &str,
+    count: &Count,
+    kind: OutputKind,
+    args: &Args,
+    is_terminal: bool,
+) -> String {
+    let mut output = vec![format_header(name, kind, args.no_color, is_terminal)];
     output.extend(format_count_lines(count, args));
     output.join("\n")
 }
@@ -97,7 +129,14 @@ fn format_compact_counts(count: &Count, args: &Args) -> String {
     parts.join(", ")
 }
 
-pub fn format_compact_output(name: &str, count: &Count, kind: OutputKind, args: &Args) -> String {
+pub fn format_compact_output(
+    name: &str,
+    count: &Count,
+    kind: OutputKind,
+    args: &Args,
+    is_terminal: bool,
+) -> String {
+    let name = sanitize_for_display(name, is_terminal);
     let header = match kind {
         OutputKind::File => format!("{name}:"),
         OutputKind::Directory(file_count) => {
@@ -132,19 +171,25 @@ fn format_single_count(count: &Count, args: &Args) -> String {
     format!("{} {unit}", format_number(value))
 }
 
-fn format_verbose_entry(entry: &FileEntry, args: &Args) -> String {
+fn format_verbose_entry(entry: &FileEntry, args: &Args, is_terminal: bool) -> String {
+    let path_str = entry.path.display().to_string();
     format!(
         "{}{}  {}",
         icon(args.no_color, FILE_ICON),
-        entry.path.display(),
+        sanitize_for_display(&path_str, is_terminal),
         format_single_count(&entry.count, args)
     )
 }
 
-pub fn format_verbose_output(entries: &[FileEntry], total: &Count, args: &Args) -> String {
+pub fn format_verbose_output(
+    entries: &[FileEntry],
+    total: &Count,
+    args: &Args,
+    is_terminal: bool,
+) -> String {
     let mut lines: Vec<String> = entries
         .iter()
-        .map(|e| format_verbose_entry(e, args))
+        .map(|e| format_verbose_entry(e, args, is_terminal))
         .collect();
 
     lines.push(format_separator().to_string());
@@ -296,6 +341,78 @@ mod tests {
     }
 
     #[test]
+    fn sanitize_for_display_replaces_control_chars_when_terminal() {
+        // ESC (used by ANSI escape sequences) and a raw newline, both of
+        // which could manipulate or forge lines in a terminal (#81).
+        let name = "evil\x1b[31mred\x1b[0m\nname.txt";
+        let sanitized = sanitize_for_display(name, true);
+        assert!(!sanitized.contains('\x1b'));
+        assert!(!sanitized.contains('\n'));
+        assert!(sanitized.contains('\u{FFFD}'));
+    }
+
+    #[test]
+    fn sanitize_for_display_passes_through_when_not_a_terminal() {
+        // Piped/redirected output doesn't interpret escape codes, and JSON
+        // output escapes control characters separately (via serde) -- this
+        // sanitization is purely a terminal-display safeguard.
+        let name = "evil\x1b[31mname.txt";
+        assert_eq!(sanitize_for_display(name, false), name);
+    }
+
+    #[test]
+    fn sanitize_for_display_replaces_c1_control_chars() {
+        // U+009B and U+009D are the single-byte forms of CSI and OSC; some
+        // terminals execute them the same as the two-byte ESC-prefixed
+        // sequences, so they need the same treatment as C0/DEL.
+        let name = "\u{9b}[31mred\u{9d}0;evil\u{9c}.txt";
+        let sanitized = sanitize_for_display(name, true);
+        assert!(!sanitized.contains('\u{9b}'));
+        assert!(!sanitized.contains('\u{9d}'));
+        assert!(!sanitized.contains('\u{9c}'));
+    }
+
+    #[test]
+    fn sanitize_for_display_passes_through_clean_names_unchanged() {
+        let name = "ordinary_file.txt";
+        assert_eq!(sanitize_for_display(name, true), name);
+    }
+
+    #[test]
+    fn format_output_sanitizes_the_name_when_is_terminal() {
+        let count = Count::default();
+        let args = default_args();
+        let output = format_output("evil\x1bname.txt", &count, OutputKind::File, &args, true);
+        assert!(!output.contains('\x1b'));
+
+        let output = format_output("evil\x1bname.txt", &count, OutputKind::File, &args, false);
+        assert!(output.contains('\x1b'));
+    }
+
+    #[test]
+    fn format_compact_output_sanitizes_the_name_when_is_terminal() {
+        let count = Count::default();
+        let args = Args {
+            compact: true,
+            ..default_args()
+        };
+        let output =
+            format_compact_output("evil\x1bname.txt", &count, OutputKind::File, &args, true);
+        assert!(!output.contains('\x1b'));
+    }
+
+    #[test]
+    fn format_verbose_output_sanitizes_the_path_when_is_terminal() {
+        let entries = vec![FileEntry {
+            path: "evil\x1bname.txt".into(),
+            count: Count::default(),
+        }];
+        let args = default_args();
+        let output = format_verbose_output(&entries, &Count::default(), &args, true);
+        assert!(!output.contains('\x1b'));
+    }
+
+    #[test]
     fn verbose_single_metric_uses_args_show_helpers() {
         // Regression test for #53.
         let count = Count {
@@ -313,7 +430,7 @@ mod tests {
             bytes: true,
             ..default_args()
         };
-        let output = format_verbose_output(&entries, &count, &args);
+        let output = format_verbose_output(&entries, &count, &args, false);
         assert!(output.contains("2 words"));
         assert!(!output.contains("1 lines"));
 
@@ -322,7 +439,7 @@ mod tests {
             max_line_length: true,
             ..default_args()
         };
-        let output = format_verbose_output(&entries, &count, &args);
+        let output = format_verbose_output(&entries, &count, &args, false);
         assert!(output.contains("4 max"));
         assert!(!output.contains("1 lines"));
 
@@ -332,7 +449,7 @@ mod tests {
             max_line_length: true,
             ..default_args()
         };
-        let output = format_verbose_output(&entries, &count, &args);
+        let output = format_verbose_output(&entries, &count, &args, false);
         assert!(output.contains("1 lines"));
         assert!(!output.contains("4 max"));
     }
@@ -361,7 +478,7 @@ mod tests {
             max_line_length: 80,
         };
         let args = default_args();
-        let output = format_output("file.txt", &count, OutputKind::File, &args);
+        let output = format_output("file.txt", &count, OutputKind::File, &args, false);
         assert!(output.contains("file.txt"));
         assert!(output.contains("Lines:"));
         assert!(output.contains("50"));
@@ -383,7 +500,7 @@ mod tests {
             lines: true,
             ..default_args()
         };
-        let output = format_output("file.txt", &count, OutputKind::File, &args);
+        let output = format_output("file.txt", &count, OutputKind::File, &args, false);
         assert!(output.contains("Lines:"));
         assert!(!output.contains("Words:"));
         assert!(!output.contains("Bytes:"));
@@ -453,7 +570,7 @@ mod tests {
             max_line_length: 200,
         };
         let args = default_args();
-        let output = format_output("src/", &count, OutputKind::Directory(5), &args);
+        let output = format_output("src/", &count, OutputKind::Directory(5), &args, false);
         assert!(output.contains("\u{1F4C1} src/ (5 files)"));
         assert!(output.contains("Lines:"));
         assert!(output.contains("1,234"));
@@ -472,7 +589,7 @@ mod tests {
             max_line_length: 50,
         };
         let args = default_args();
-        let output = format_output("dir/", &count, OutputKind::Directory(1), &args);
+        let output = format_output("dir/", &count, OutputKind::Directory(1), &args, false);
         assert!(output.contains("\u{1F4C1} dir/ (1 file)"));
     }
 
@@ -488,7 +605,7 @@ mod tests {
             no_color: true,
             ..default_args()
         };
-        let output = format_output("file.txt", &count, OutputKind::File, &args);
+        let output = format_output("file.txt", &count, OutputKind::File, &args, false);
         assert!(!output.contains("\u{1F4C4}")); // No file icon
         assert!(output.contains("file.txt"));
     }
@@ -505,7 +622,7 @@ mod tests {
             no_color: true,
             ..default_args()
         };
-        let output = format_output("src/", &count, OutputKind::Directory(3), &args);
+        let output = format_output("src/", &count, OutputKind::Directory(3), &args, false);
         assert!(!output.contains("\u{1F4C1}")); // No folder icon
         assert!(output.contains("src/"));
     }
@@ -539,7 +656,7 @@ mod tests {
             compact: true,
             ..default_args()
         };
-        let output = format_compact_output("file.txt", &count, OutputKind::File, &args);
+        let output = format_compact_output("file.txt", &count, OutputKind::File, &args, false);
         assert!(output.contains("file.txt:"));
         assert!(output.contains("50 lines"));
         assert!(output.contains("200 words"));
@@ -560,7 +677,7 @@ mod tests {
             compact: true,
             ..default_args()
         };
-        let output = format_compact_output("file.txt", &count, OutputKind::File, &args);
+        let output = format_compact_output("file.txt", &count, OutputKind::File, &args, false);
         assert!(output.contains("50 lines"));
         assert!(!output.contains("words"));
         assert!(!output.contains("bytes"));
@@ -578,7 +695,7 @@ mod tests {
             compact: true,
             ..default_args()
         };
-        let output = format_compact_output("src/", &count, OutputKind::Directory(3), &args);
+        let output = format_compact_output("src/", &count, OutputKind::Directory(3), &args, false);
         assert!(output.contains("150 lines"));
         // Exact match on the separator, not just a substring: this pins the
         // single space between "files):" and the counts, matching
@@ -616,7 +733,7 @@ mod tests {
             max_line_length: true,
             ..default_args()
         };
-        let output = format_output("file.txt", &count, OutputKind::File, &args);
+        let output = format_output("file.txt", &count, OutputKind::File, &args, false);
         assert!(output.contains("Max Line:"));
         assert!(output.contains("120"));
         assert!(!output.contains("Lines:"));
@@ -637,7 +754,7 @@ mod tests {
             compact: true,
             ..default_args()
         };
-        let output = format_compact_output("file.txt", &count, OutputKind::File, &args);
+        let output = format_compact_output("file.txt", &count, OutputKind::File, &args, false);
         assert!(output.contains("max:120"));
         assert!(!output.contains("lines"));
     }
