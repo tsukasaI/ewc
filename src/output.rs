@@ -49,16 +49,21 @@ fn pluralize_files(count: usize) -> &'static str {
 const FILE_ICON: &str = "\u{1F4C4} ";
 const DIR_ICON: &str = "\u{1F4C1} ";
 
+fn icon(no_color: bool, icon: &'static str) -> &'static str {
+    if no_color {
+        ""
+    } else {
+        icon
+    }
+}
+
 fn format_header(name: &str, kind: OutputKind, no_color: bool) -> String {
     match kind {
-        OutputKind::File => {
-            let icon = if no_color { "" } else { FILE_ICON };
-            format!("{icon}{name}")
-        }
+        OutputKind::File => format!("{}{name}", icon(no_color, FILE_ICON)),
         OutputKind::Directory(file_count) => {
-            let icon = if no_color { "" } else { DIR_ICON };
             format!(
-                "{icon}{name} ({file_count} {})",
+                "{}{name} ({file_count} {})",
+                icon(no_color, DIR_ICON),
                 pluralize_files(file_count)
             )
         }
@@ -96,7 +101,7 @@ pub fn format_compact_output(name: &str, count: &Count, kind: OutputKind, args: 
     let header = match kind {
         OutputKind::File => format!("{name}:"),
         OutputKind::Directory(file_count) => {
-            format!("{name} ({file_count} {}): ", pluralize_files(file_count))
+            format!("{name} ({file_count} {}):", pluralize_files(file_count))
         }
     };
     format!("{header} {}", format_compact_counts(count, args))
@@ -122,9 +127,9 @@ fn format_single_count(count: &Count, args: &Args) -> String {
 }
 
 fn format_verbose_entry(entry: &FileEntry, args: &Args) -> String {
-    let icon = if args.no_color { "" } else { FILE_ICON };
     format!(
-        "{icon}{}  {}",
+        "{}{}  {}",
+        icon(args.no_color, FILE_ICON),
         entry.path.display(),
         format_single_count(&entry.count, args)
     )
@@ -138,10 +143,10 @@ pub fn format_verbose_output(entries: &[FileEntry], total: &Count, args: &Args) 
 
     lines.push(format_separator().to_string());
 
-    let icon = if args.no_color { "" } else { DIR_ICON };
     let file_count = entries.len();
     lines.push(format!(
-        "{icon}Total ({file_count} {})  {}",
+        "{}Total ({file_count} {})  {}",
+        icon(args.no_color, DIR_ICON),
         pluralize_files(file_count),
         format_single_count(total, args)
     ));
@@ -247,8 +252,11 @@ pub fn format_json_multiple(results: &[JsonFileResult], total: &Count) -> String
 }
 
 pub fn format_total_output(file_count: usize, count: &Count, args: &Args) -> String {
-    let icon = if args.no_color { "" } else { DIR_ICON };
-    let header = format!("{icon}Total ({file_count} {})", pluralize_files(file_count));
+    let header = format!(
+        "{}Total ({file_count} {})",
+        icon(args.no_color, DIR_ICON),
+        pluralize_files(file_count)
+    );
     let mut output = vec![header];
     output.extend(format_count_lines(count, args));
     output.join("\n")
@@ -257,23 +265,7 @@ pub fn format_total_output(file_count: usize, count: &Count, args: &Args) -> Str
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn default_args() -> Args {
-        Args {
-            files: vec![],
-            lines: false,
-            words: false,
-            bytes: false,
-            max_line_length: false,
-            no_color: false,
-            all: false,
-            compact: false,
-            verbose: false,
-            json: false,
-            exclude: vec![],
-            include: vec![],
-        }
-    }
+    use crate::cli::default_args;
 
     #[test]
     fn format_number_without_comma() {
@@ -517,8 +509,11 @@ mod tests {
             ..default_args()
         };
         let output = format_compact_output("src/", &count, OutputKind::Directory(3), &args);
-        assert!(output.contains("src/ (3 files):"));
         assert!(output.contains("150 lines"));
+        // Exact match on the separator, not just a substring: this pins the
+        // single space between "files):" and the counts, matching
+        // format_compact_total's spacing for the identical shape (#51).
+        assert!(output.starts_with("src/ (3 files): 150 lines"));
     }
 
     #[test]
