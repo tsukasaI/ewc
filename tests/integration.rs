@@ -20,7 +20,7 @@ struct CommandResult {
 }
 
 fn run_ewc(args: &[&str]) -> CommandResult {
-    let output = Command::new("./target/debug/ewc")
+    let output = Command::new(env!("CARGO_BIN_EXE_ewc"))
         .args(args)
         .output()
         .expect("failed to run ewc");
@@ -414,7 +414,7 @@ fn run_ewc_with_stdin(args: &[&str], stdin_content: &str) -> CommandResult {
     use std::io::Write;
     use std::process::Stdio;
 
-    let mut child = Command::new("./target/debug/ewc")
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ewc"))
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -617,7 +617,7 @@ fn non_utf8_file_counts_instead_of_erroring() {
 
 #[test]
 fn stdin_non_utf8_input_counts_instead_of_erroring() {
-    let output = Command::new("./target/debug/ewc")
+    let output = Command::new(env!("CARGO_BIN_EXE_ewc"))
         .args(["--json"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())

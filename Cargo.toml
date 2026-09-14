@@ -9,6 +9,7 @@ repository = "https://github.com/tsukasaI/ewc"
 keywords = ["cli", "wc", "word-count", "utility"]
 categories = ["command-line-utilities"]
 readme = "README.md"
+exclude = ["Formula/", "flake.nix", "flake.lock", ".envrc", ".pre-commit-config.yaml", "cliff.toml", "spec.md", "CLAUDE.md", ".github/"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
