@@ -15,11 +15,11 @@
         in {
           default = pkgs.rustPlatform.buildRustPackage {
             pname = "ewc";
-            version = "0.4.0";
+            version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).package.version;
             src = ./.;
             cargoLock.lockFile = ./Cargo.lock;
             # Skip integration tests in Nix sandbox (requires filesystem access)
-            # Unit tests (65 tests) still run
+            # Unit tests still run
             cargoTestFlags = [ "--lib" ];
 
             meta = with pkgs.lib; {
@@ -68,7 +68,6 @@
               pkgs.rustc
               pkgs.rustfmt
               pkgs.clippy
-              pkgs.git-cliff
             ] ++ self.checks.${system}.pre-commit.enabledPackages;
           };
         }

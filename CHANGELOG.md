@@ -7,27 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Added
-
-- Longest line length option (`-L` / `--max-line-length`) to report the length of the longest line
-- Exclude pattern option (`--exclude <PATTERN>`) to filter out files matching glob patterns during directory traversal
-- Include pattern option (`--include <PATTERN>`) to only process files matching glob patterns
-- Parallel file processing using `rayon` for faster directory scanning
-
 ### Fixed
 
 - `--exclude` now prunes a matching directory from the walk instead of only filtering its files afterward, so an unreadable subdirectory under an excluded prefix is no longer reported as a failure; this also means a bare directory name (e.g. `--exclude target`) now excludes that directory, which was previously a no-op
-- A broken symlink encountered during a directory walk is now reported as a skipped entry (previously silently dropped); a symlink to a file/directory that exists is still silently skipped, matching the existing not-following policy
-- An invalid `--exclude`/`--include` glob pattern is now reported once instead of once per top-level path argument, and is now also validated in stdin mode instead of being silently ignored
+- A broken symlink encountered during a directory walk is now reported as a skipped entry and causes a non-zero exit code, like any other skipped entry (previously silently dropped with no effect on the exit code); a symlink to a file/directory that exists is still silently skipped, matching the existing not-following policy
+- An invalid `--exclude`/`--include` glob pattern is now reported once instead of once per directory argument, and is now validated up front even when nothing is walked (stdin or file-only arguments) instead of being silently ignored
 
 ### Changed
 
 - `FilterConfig::new` now compiles and validates its glob patterns eagerly, returning `io::Result<Self>`, instead of deferring pattern compilation to each directory walk
-
-### Dependencies
-
-- Added `globset` for glob pattern matching
-- Added `rayon` for parallel processing
 
 ## [0.4.0] - 2026-08-14
 
@@ -67,18 +55,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Skip integration tests in Nix sandbox environment (filesystem access issues)
 
-## [0.1.0] - 2026-01-19
+## [0.3.0] - 2026-01-22
 
-### Features
+### Added
 
-- Initial release of ewc (enhanced word count)
-- Human-readable output with clear labels
-- Number formatting with thousands separators (1,234)
-- Visual file icons
-- Multiple file support with total aggregation
+- Longest line length option (`-L` / `--max-line-length`) to report the length of the longest line
+- Exclude pattern option (`--exclude <PATTERN>`) to filter out files matching glob patterns during directory traversal
+- Include pattern option (`--include <PATTERN>`) to only process files matching glob patterns
+- Parallel file processing using `rayon` for faster directory scanning
+
+### Dependencies
+
+- Added `globset` for glob pattern matching
+- Added `rayon` for parallel processing
+
+## [0.2.0] - 2026-01-17
+
+### Added
+
+- Multiple file total aggregation
 - Directory support with recursive file counting
 - Stdin support for piped input
-- Output options: `--lines`, `--words`, `--bytes`
 - Display options: `--compact`, `--no-color`, `--verbose`
 - Hidden files support with `--all`
 - JSON output with `--json`
@@ -88,3 +85,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Nix flake development environment
 - Pre-commit hooks (rustfmt, clippy, cargo-check)
 - Integration tests
+
+## [0.1.0] - 2026-01-17
+
+### Features
+
+- Initial release of ewc (enhanced word count)
+- Human-readable output with clear labels
+- Number formatting with thousands separators (1,234)
+- Visual file icons
+- Multi-file support (per-file output; no total aggregation yet)
+- Output options: `--lines`, `--words`, `--bytes`
