@@ -84,11 +84,11 @@ ewc [OPTIONS] [FILE]...
 | `--words` | `-w` | Show word count only |
 | `--bytes` | `-c` | Show byte count only |
 | `--max-line-length` | `-L` | Show longest line length, in characters (not bytes) |
-| `--verbose` | `-v` | Show file list (directories) |
+| `--verbose` | `-v` | Show file list (directories); cannot be combined with `--compact` |
 | `--all` | `-a` | Include hidden files |
-| `--compact` | `-C` | Single-line output |
+| `--compact` | `-C` | Single-line output; cannot be combined with `--verbose` |
 | `--no-color` | | Disable icons |
-| `--json` | | JSON output |
+| `--json` | | JSON output (cannot be combined with `--compact` or `--verbose`) |
 | `--exclude` | | Exclude files matching glob pattern (repeatable) |
 | `--include` | | Include only files matching glob pattern (repeatable) |
 | `--help` | `-h` | Print help |

@@ -72,11 +72,11 @@ $ ewc -v src/
 | `--words` | `-w` | Show word count only |
 | `--bytes` | `-c` | Show byte count only |
 | `--max-line-length` | `-L` | Show longest line length, in characters (not bytes) |
-| `--verbose` | `-v` | Show file list (directories) |
+| `--verbose` | `-v` | Show file list (directories); cannot be combined with `--compact` |
 | `--all` | `-a` | Include hidden files/directories |
-| `--compact` | `-C` | Single-line output |
+| `--compact` | `-C` | Single-line output; cannot be combined with `--verbose` |
 | `--no-color` | - | Disable icons |
-| `--json` | - | JSON output |
+| `--json` | - | JSON output (cannot be combined with `--compact` or `--verbose`) |
 | `--exclude` | - | Exclude files matching glob pattern (repeatable) |
 | `--include` | - | Include only files matching glob pattern (repeatable) |
 
@@ -142,6 +142,29 @@ $ cat file.txt | ewc -
    Words:     200
    Bytes:   1,500
 ```
+
+### JSON Mode
+
+- `--json` cannot be combined with `--compact` or `--verbose`; neither
+  affects JSON output, so combining them is rejected at argument parsing
+  rather than silently ignored. `--no-color` is still meaningful with
+  `--json`: JSON mode's per-failure warnings go to stderr, not stdout
+  JSON, and `--no-color` suppresses the icon on those
+- Reading from stdin always produces a bare object, whether or not the
+  read succeeded (a failed read reports a zeroed count rather than
+  switching to the multi-input envelope shape). A single file/directory
+  argument that fails, or an invalid `--exclude`/`--include` pattern,
+  still falls back to the `{"files": [...], "total": {...}}` envelope
+  with an empty `files` array; unifying that with stdin's behavior is
+  tracked separately (#108)
+- A directory (or the aggregate `total` in the envelope shape) includes
+  a `skipped_count` field when one or more of its *own* entries couldn't
+  be counted (permission denied, vanished mid-walk, etc.), so a consumer
+  parsing only stdout JSON can tell a directory's total is partial. This
+  does not cover a top-level file/directory argument that failed
+  entirely (that's absent from `files` and only visible via the exit
+  code and stderr). The field is omitted entirely when nothing was
+  skipped, so the common case's shape is unchanged
 
 ### Counting Semantics
 

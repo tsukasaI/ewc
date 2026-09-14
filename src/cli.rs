@@ -37,7 +37,7 @@ pub struct Args {
     pub all: bool,
 
     /// Compact one-line output format
-    #[arg(short = 'C', long)]
+    #[arg(short = 'C', long, conflicts_with = "verbose")]
     pub compact: bool,
 
     /// Show file list for directories
@@ -45,7 +45,12 @@ pub struct Args {
     pub verbose: bool,
 
     /// Output in JSON format
-    #[arg(long)]
+    ///
+    /// --compact and --verbose have no effect on JSON output and cannot be
+    /// combined with it. --no-color is still meaningful: JSON mode's
+    /// per-failure warnings go to stderr, not stdout JSON, and --no-color
+    /// suppresses the icon on those.
+    #[arg(long, conflicts_with_all = ["compact", "verbose"])]
     pub json: bool,
 
     /// Exclude files matching glob pattern (repeatable)

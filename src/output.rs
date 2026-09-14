@@ -165,6 +165,14 @@ pub struct JsonFileResult {
     pub name: String,
     pub count: Count,
     pub kind: OutputKind,
+    /// Directory entries or sub-paths that couldn't be counted (permission
+    /// denied, vanished mid-walk, etc.). A directory's totals are complete
+    /// only when this is zero (#87).
+    pub skipped_count: usize,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 #[derive(Serialize)]
@@ -184,6 +192,8 @@ struct JsonDirectory<'a> {
     lines: u64,
     words: u64,
     bytes: u64,
+    #[serde(skip_serializing_if = "is_zero")]
+    skipped_count: usize,
 }
 
 #[derive(Serialize)]
@@ -200,6 +210,8 @@ struct JsonTotal {
     lines: u64,
     words: u64,
     bytes: u64,
+    #[serde(skip_serializing_if = "is_zero")]
+    skipped_count: usize,
 }
 
 #[derive(Serialize)]
@@ -218,6 +230,7 @@ fn json_entry(result: &JsonFileResult) -> JsonEntry<'_> {
             lines: count.lines,
             words: count.words,
             bytes: count.bytes,
+            skipped_count: result.skipped_count,
         }),
         OutputKind::File => JsonEntry::File(JsonFile {
             file: &result.name,
@@ -242,11 +255,13 @@ pub fn format_json_multiple(results: &[JsonFileResult], total: &Count) -> String
             OutputKind::Directory(file_count) => file_count,
         })
         .sum();
+    let total_skipped_count: usize = results.iter().map(|r| r.skipped_count).sum();
 
     let payload = JsonMultiple {
         files,
         total: JsonTotal {
             file_count: total_file_count,
+            skipped_count: total_skipped_count,
             max_line_length: total.max_line_length,
             lines: total.lines,
             words: total.words,
@@ -637,6 +652,7 @@ mod tests {
             name,
             count: Count::default(),
             kind: OutputKind::File,
+            skipped_count: 0,
         };
 
         let json = format_json_single(&result);
@@ -661,6 +677,7 @@ mod tests {
                 max_line_length: 120,
             },
             kind: OutputKind::File,
+            skipped_count: 0,
         };
 
         let json = format_json_single(&result);
@@ -681,6 +698,7 @@ mod tests {
                 max_line_length: 20,
             },
             kind: OutputKind::Directory(3),
+            skipped_count: 0,
         };
 
         let json = format_json_single(&result);
@@ -703,6 +721,7 @@ mod tests {
                     max_line_length: 5,
                 },
                 kind: OutputKind::File,
+                skipped_count: 0,
             },
             JsonFileResult {
                 name: "dir".to_string(),
@@ -713,6 +732,7 @@ mod tests {
                     max_line_length: 8,
                 },
                 kind: OutputKind::Directory(2),
+                skipped_count: 1,
             },
         ];
         let total = Count {
@@ -728,7 +748,23 @@ mod tests {
         assert_eq!(parsed["files"][0]["file"], "weird\u{1B}name.txt");
         assert!(!json.contains('\u{1B}'));
         assert_eq!(parsed["files"][1]["directory"], "dir");
+        assert_eq!(parsed["files"][1]["skipped_count"], 1);
         assert_eq!(parsed["total"]["file_count"], 3); // 1 file + 2 in the directory
         assert_eq!(parsed["total"]["lines"], 4);
+        assert_eq!(parsed["total"]["skipped_count"], 1);
+    }
+
+    #[test]
+    fn json_skipped_count_omitted_when_zero() {
+        // The common (no failures) case must not grow a new key, so
+        // existing consumers parsing a fixed schema aren't surprised (#87).
+        let result = JsonFileResult {
+            name: "src".to_string(),
+            count: Count::default(),
+            kind: OutputKind::Directory(3),
+            skipped_count: 0,
+        };
+        let json = format_json_single(&result);
+        assert!(!json.contains("skipped_count"));
     }
 }
