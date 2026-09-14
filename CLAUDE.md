@@ -27,18 +27,20 @@ Nix-specific requirement.
 - `cargo clippy -- -D warnings` — matches CI exactly
 - `cargo fmt` / `cargo fmt --check`
 
-**Nix sandbox constraint**: commit `06c8454` added `cargoTestFlags = [
-"--lib" ]` on the diagnosis that the sandbox lacks filesystem access for
-integration tests. That diagnosis was wrong (#62): the surviving `--lib`
-unit tests already use `tempfile`/`std::fs` freely and pass sandboxed. The
-real cause was `buildRustPackage`'s default release profile producing
-`target/release/ewc`, while `tests/integration.rs` looked for a hardcoded
-`./target/debug/ewc`, a path plain `cargo test` happens to satisfy, masking
-the bug. Both `tests/integration.rs` and `tests/benchmark.rs` now use
+**Nix build and integration tests**: commit `06c8454` added
+`cargoTestFlags = [ "--lib" ]` on the diagnosis that the sandbox lacks
+filesystem access for integration tests. That diagnosis was wrong (#62):
+the surviving `--lib` unit tests already use `tempfile`/`std::fs` freely
+and pass sandboxed (observed locally, not CI-checked; no workflow runs
+`nix build`). The real cause was that `buildRustPackage` runs `cargo test
+--profile release --target <triple>`, landing the binary at
+`target/<triple>/release/ewc`, while `tests/integration.rs` looked for a
+hardcoded `./target/debug/ewc` (neither that nor a bare
+`./target/release/ewc` would have matched); plain `cargo test` happens to
+produce the exact `./target/debug/ewc` path, masking the bug. Both
+`tests/integration.rs` and `tests/benchmark.rs` now use
 `env!("CARGO_BIN_EXE_ewc")` instead (#62, #63), and the `cargoTestFlags`
-skip was removed. Not verified with an actual `nix build` from this
-session: its build sandbox couldn't reach crates.io through this
-environment's network proxy, a local limitation, not a code issue.
+skip was removed.
 
 ## Source of truth
 
@@ -81,3 +83,6 @@ if either changes.
   line reference above will drift once PRs touching that file merge
   (several are in flight as of this writing); re-check it rather than
   trusting the number.
+- Integration tests under `nix build` have not actually been verified
+  since the `--lib` skip was removed (#62): run `nix build` and confirm
+  `tests/integration.rs` appears in the checkPhase log.
