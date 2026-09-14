@@ -1,6 +1,6 @@
 use clap::Parser;
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Default)]
 #[command(
     name = "ewc",
     about = "Enhanced Word Count - A modern alternative to wc",
@@ -79,25 +79,13 @@ impl Args {
 }
 
 #[cfg(test)]
+pub(crate) fn default_args() -> Args {
+    Args::default()
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
-
-    fn default_args() -> Args {
-        Args {
-            files: vec![],
-            lines: false,
-            words: false,
-            bytes: false,
-            max_line_length: false,
-            no_color: false,
-            all: false,
-            compact: false,
-            verbose: false,
-            json: false,
-            exclude: vec![],
-            include: vec![],
-        }
-    }
 
     #[test]
     fn default_shows_all() {
@@ -153,51 +141,6 @@ mod tests {
     }
 
     #[test]
-    fn no_color_flag_parsed() {
-        let args = Args {
-            no_color: true,
-            ..default_args()
-        };
-        assert!(args.no_color);
-    }
-
-    #[test]
-    fn all_flag_parsed() {
-        let args = Args {
-            all: true,
-            ..default_args()
-        };
-        assert!(args.all);
-    }
-
-    #[test]
-    fn compact_flag_parsed() {
-        let args = Args {
-            compact: true,
-            ..default_args()
-        };
-        assert!(args.compact);
-    }
-
-    #[test]
-    fn verbose_flag_parsed() {
-        let args = Args {
-            verbose: true,
-            ..default_args()
-        };
-        assert!(args.verbose);
-    }
-
-    #[test]
-    fn json_flag_parsed() {
-        let args = Args {
-            json: true,
-            ..default_args()
-        };
-        assert!(args.json);
-    }
-
-    #[test]
     fn max_line_length_flag_parsed() {
         let args = Args {
             max_line_length: true,
@@ -217,26 +160,5 @@ mod tests {
         assert!(!args.show_words());
         assert!(!args.show_bytes());
         assert!(args.show_max_line_length());
-    }
-
-    #[test]
-    fn exclude_patterns_parsed() {
-        let args = Args {
-            exclude: vec!["*.md".to_string(), "target/*".to_string()],
-            ..default_args()
-        };
-        assert_eq!(args.exclude.len(), 2);
-        assert_eq!(args.exclude[0], "*.md");
-        assert_eq!(args.exclude[1], "target/*");
-    }
-
-    #[test]
-    fn include_patterns_parsed() {
-        let args = Args {
-            include: vec!["*.rs".to_string()],
-            ..default_args()
-        };
-        assert_eq!(args.include.len(), 1);
-        assert_eq!(args.include[0], "*.rs");
     }
 }

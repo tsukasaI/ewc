@@ -29,7 +29,8 @@ pub struct Count {
 }
 
 impl Count {
-    pub fn from_content(content: &str) -> Self {
+    #[cfg(test)]
+    fn from_content(content: &str) -> Self {
         let mut acc = CountAccumulator::default();
         acc.write(content.as_bytes());
         acc.finish()
@@ -139,10 +140,7 @@ impl Add for Count {
 
 impl AddAssign for Count {
     fn add_assign(&mut self, other: Self) {
-        self.lines = self.lines.saturating_add(other.lines);
-        self.words = self.words.saturating_add(other.words);
-        self.bytes = self.bytes.saturating_add(other.bytes);
-        self.max_line_length = self.max_line_length.max(other.max_line_length);
+        *self = *self + other;
     }
 }
 

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `--compact` directory output no longer emits a double space after `(N files):` (files already used a single space; directories now match)
 - `--exclude` now prunes a matching directory from the walk instead of only filtering its files afterward, so an unreadable subdirectory under an excluded prefix is no longer reported as a failure; this also means a bare directory name (e.g. `--exclude target`) now excludes that directory, which was previously a no-op
 - A broken symlink encountered during a directory walk is now reported as a skipped entry and causes a non-zero exit code, like any other skipped entry (previously silently dropped with no effect on the exit code); a symlink to a file/directory that exists is still silently skipped, matching the existing not-following policy
 - An invalid `--exclude`/`--include` glob pattern is now reported once instead of once per directory argument, and is now validated up front even when nothing is walked (stdin or file-only arguments) instead of being silently ignored
@@ -20,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Removed
 
 - `counter::count_directory`; call `count_directory_detailed` and use `entries.len()` for the file count
+- `Count::from_content`; it is now test-only. Use `count_from_reader(content.as_bytes())` to count in-memory content
 
 ## [0.4.0] - 2026-08-14
 
