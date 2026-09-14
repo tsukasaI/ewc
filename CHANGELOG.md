@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - A broken symlink encountered during a directory walk is now reported as a skipped entry and causes a non-zero exit code, like any other skipped entry (previously silently dropped with no effect on the exit code); a symlink to a file/directory that exists is still silently skipped, matching the existing not-following policy
 - An invalid `--exclude`/`--include` glob pattern is now reported once instead of once per directory argument, and is now validated up front even when nothing is walked (stdin or file-only arguments) instead of being silently ignored
 - `-v` now honors `-w`/`-c`/`-L` combinations, showing the first requested metric in lines -> words -> bytes -> max order, instead of falling back to lines whenever more than one flag was set without `-l`
-- Non-UTF-8 filenames are no longer rejected at argument parsing; they're now accepted and displayed lossily, the same way `wc` handles them
+- Non-UTF-8 filenames are no longer rejected at argument parsing; they're now accepted and counted like `wc` does, with invalid byte sequences rendered as U+FFFD in output
 - A single bare `-` argument now reads from stdin, matching `wc`, instead of being treated as a literal filename
 
 ### Changed

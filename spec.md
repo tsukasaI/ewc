@@ -125,10 +125,18 @@ program guarantees between the two streams.
 
 ### Standard Input
 
-When no arguments provided, reads from stdin (pipe support).
+When no arguments are provided, or the sole argument is `-`, reads from
+stdin (pipe support). A file literally named `-` can still be counted by
+passing a path to it (e.g. `./-`) instead of the bare name.
 
 ```bash
 $ cat file.txt | ewc
+📄 <stdin>
+   Lines:      50
+   Words:     200
+   Bytes:   1,500
+
+$ cat file.txt | ewc -
 📄 <stdin>
    Lines:      50
    Words:     200

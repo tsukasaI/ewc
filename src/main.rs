@@ -127,7 +127,7 @@ fn run_json_mode(args: &Args, config: &FilterConfig) {
     let mut has_error = false;
 
     for file in &args.files {
-        let path = Path::new(file);
+        let path = file.as_path();
         let result = match process_path(path, config) {
             Ok(result) => result,
             Err(e) => {
@@ -178,7 +178,7 @@ fn run_normal_mode(args: &Args, config: &FilterConfig) {
     let file_count = args.files.len();
 
     for (index, file) in args.files.iter().enumerate() {
-        let path = Path::new(file);
+        let path = file.as_path();
         let is_last = index == file_count - 1;
 
         if path.is_dir() && args.verbose {

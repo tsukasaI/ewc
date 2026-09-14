@@ -621,6 +621,28 @@ fn non_utf8_filename_is_accepted_at_argv() {
 }
 
 #[test]
+#[cfg(unix)]
+fn non_utf8_argv_reaches_ewc_instead_of_being_rejected_by_the_parser() {
+    // Unlike the filesystem test above, this needs no file to exist: it only
+    // checks that clap's argument parser accepts the non-UTF-8 byte at all
+    // (a String-typed argv rejects it with exit code 2 before ewc runs), so
+    // it also covers macOS, where creating such a file is not possible.
+    use std::os::unix::ffi::OsStrExt;
+
+    let name = std::ffi::OsStr::from_bytes(b"bad\xFFname.txt");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_ewc"))
+        .arg(name)
+        .output()
+        .expect("failed to run ewc");
+
+    assert_eq!(output.status.code(), Some(1)); // not found, not a parse error
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("bad\u{FFFD}name.txt"));
+    assert!(!stderr.contains("invalid UTF-8"));
+}
+
+#[test]
 fn directory_and_nonexistent_file() {
     let dir = create_test_dir();
     let result = run_ewc(&[dir.path().to_str().unwrap(), "nonexistent.txt"]);

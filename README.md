@@ -114,6 +114,7 @@ ewc src/
 
 # Pipe from stdin
 cat file.txt | ewc
+cat file.txt | ewc -   # explicit "-" works the same way
 
 # JSON output
 ewc --json file.txt
