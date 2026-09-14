@@ -222,7 +222,7 @@ file.txt: max:120
 
 ### Exclude/Include Patterns
 
-The `--exclude` and `--include` options filter files during directory traversal using glob patterns.
+The `--exclude` and `--include` options filter files during directory traversal using glob patterns. `--exclude` also prunes a matching directory from the walk entirely (it is not just filtered out afterward); `--include` only filters files, so it can never prune a directory `--exclude` didn't already prune.
 
 #### Behavior
 
@@ -230,6 +230,9 @@ The `--exclude` and `--include` options filter files during directory traversal 
 - `--exclude` takes precedence over `--include`
 - Multiple patterns can be specified (options are repeatable)
 - Patterns match against relative paths from the walk root
+- A pattern that matches a directory's own name or relative path (e.g.
+  `--exclude target`) prunes that directory and everything under it from
+  the walk, rather than only filtering files one at a time
 
 #### Examples
 

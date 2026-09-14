@@ -152,11 +152,11 @@ impl Sum for Count {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct FilterConfig {
     pub include_hidden: bool,
     exclude_set: GlobSet,
     include_set: GlobSet,
-    has_include_patterns: bool,
 }
 
 impl Default for FilterConfig {
@@ -176,7 +176,6 @@ impl FilterConfig {
             include_hidden,
             exclude_set: Self::build_globset(exclude_patterns)?,
             include_set: Self::build_globset(include_patterns)?,
-            has_include_patterns: !include_patterns.is_empty(),
         })
     }
 
@@ -301,17 +300,8 @@ fn walk_directory(
             }
         };
 
-        if entry.file_type().is_symlink() {
-            if let Err(e) = fs::metadata(entry.path()) {
-                skipped.push(SkippedEntry {
-                    path: entry.path().to_path_buf(),
-                    error: e.to_string(),
-                });
-            }
-            continue;
-        }
-
-        if !entry.file_type().is_file() {
+        let file_type = entry.file_type();
+        if !file_type.is_symlink() && !file_type.is_file() {
             continue;
         }
 
@@ -321,7 +311,17 @@ fn walk_directory(
         if matches_glob(&config.exclude_set, relative_path) {
             continue;
         }
-        if config.has_include_patterns && !matches_glob(&config.include_set, relative_path) {
+        if !config.include_set.is_empty() && !matches_glob(&config.include_set, relative_path) {
+            continue;
+        }
+
+        if file_type.is_symlink() {
+            if let Err(e) = fs::metadata(file_path) {
+                skipped.push(SkippedEntry {
+                    path: file_path.to_path_buf(),
+                    error: e.to_string(),
+                });
+            }
             continue;
         }
 
@@ -1049,6 +1049,65 @@ mod tests {
     }
 
     #[test]
+    fn count_directory_exclude_prunes_bare_directory_name() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("root.txt"), "root\n").unwrap();
+
+        let subdir = dir.path().join("target");
+        std::fs::create_dir(&subdir).unwrap();
+        std::fs::write(subdir.join("build.txt"), "build\n").unwrap();
+
+        // "target" (no trailing "/*") only matches the bare directory name
+        // via is_excluded_dir's matches_glob branch, not the trailing-slash
+        // branch exercised by count_directory_exclude_directory_pattern.
+        let config = FilterConfig::new(false, &["target".to_string()], &[]).unwrap();
+        let (count, file_count, skipped) = count_directory(dir.path(), &config).unwrap();
+
+        assert!(skipped.is_empty());
+        assert_eq!(file_count, 1);
+        assert_eq!(count.words, 1);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn count_directory_include_pattern_does_not_undo_exclude_pruning() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("root.rs"), "root\n").unwrap();
+
+        // An include pattern must only filter files, never un-prune a
+        // directory an exclude pattern already pruned: if it did,
+        // walkdir would descend into `locked` and this test would
+        // surface a skipped entry instead of a clean, empty one.
+        let target = dir.path().join("target");
+        std::fs::create_dir(&target).unwrap();
+        let locked = target.join("locked");
+        std::fs::create_dir(&locked).unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let config =
+            FilterConfig::new(false, &["target/*".to_string()], &["*.rs".to_string()]).unwrap();
+        let result = count_directory(dir.path(), &config);
+        let restore = || {
+            let _ = std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755));
+        };
+
+        let (count, file_count, skipped) = match result {
+            Ok(v) => v,
+            Err(e) => {
+                restore();
+                panic!("count_directory failed: {e}");
+            }
+        };
+        restore();
+
+        assert!(skipped.is_empty());
+        assert_eq!(file_count, 1);
+        assert_eq!(count.words, 1);
+    }
+
+    #[test]
     #[cfg(unix)]
     fn count_directory_reports_broken_symlink_as_skipped() {
         use std::os::unix::fs::symlink;
@@ -1065,6 +1124,44 @@ mod tests {
         assert_eq!(count.words, 1);
         assert_eq!(skipped.len(), 1);
         assert_eq!(skipped[0].path, broken_link);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn count_directory_broken_symlink_matching_exclude_is_not_reported() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("root.txt"), "root\n").unwrap();
+
+        let broken_link = dir.path().join("dangling.lock");
+        symlink(dir.path().join("does_not_exist"), &broken_link).unwrap();
+
+        let config = FilterConfig::new(false, &["*.lock".to_string()], &[]).unwrap();
+        let (count, file_count, skipped) = count_directory(dir.path(), &config).unwrap();
+
+        assert!(skipped.is_empty());
+        assert_eq!(file_count, 1);
+        assert_eq!(count.words, 1);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn count_directory_broken_symlink_failing_include_is_not_reported() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("root.rs"), "root\n").unwrap();
+
+        let broken_link = dir.path().join("dangling.txt");
+        symlink(dir.path().join("does_not_exist"), &broken_link).unwrap();
+
+        let config = FilterConfig::new(false, &[], &["*.rs".to_string()]).unwrap();
+        let (count, file_count, skipped) = count_directory(dir.path(), &config).unwrap();
+
+        assert!(skipped.is_empty());
+        assert_eq!(file_count, 1);
+        assert_eq!(count.words, 1);
     }
 
     #[test]
