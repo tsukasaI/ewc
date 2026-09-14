@@ -18,12 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - A single bare `-` argument now reads from stdin, matching `wc`, instead of being treated as a literal filename
 - `--no-color` now also suppresses the warning icon on stderr; previously it only applied to the file/directory icons on stdout
 - `--json` reading from stdin now emits the same bare-object shape on a read failure as it does on success (previously it flipped to the `{files, total}` envelope on failure)
-- `--json` now rejects `--compact`, `--verbose`, and `--no-color` at argument parsing instead of silently ignoring them (none of them affect JSON output); `-v` and `-C` are now also mutually exclusive with each other
-- JSON output for a directory (and the aggregate total in the multi-input envelope) now includes a `skipped_count` field when one or more entries couldn't be counted, so a consumer parsing only stdout JSON can tell a total is partial. Omitted when nothing was skipped
+- `--json` now rejects `--compact` and `--verbose` at argument parsing instead of silently ignoring them (neither affects JSON output); `--no-color` is unaffected by this, since it still gates the icon on JSON mode's stderr warnings
+- JSON output for a directory (and the aggregate total in the multi-input envelope) now includes a `skipped_count` field when one or more of that directory's own entries couldn't be counted, so a consumer parsing only stdout JSON can tell a directory's total is partial. Omitted when nothing was skipped. A top-level file/directory argument that failed entirely is not covered by this field
 
 ### Changed
 
 - `FilterConfig::new` now compiles and validates its glob patterns eagerly, returning `io::Result<Self>`, instead of deferring pattern compilation to each directory walk
+- `-v` and `-C` are now mutually exclusive at argument parsing; the previous combined behavior (verbose output for directories, compact for files) was an unintended inconsistency, not a supported mode
 
 ### Removed
 

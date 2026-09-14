@@ -145,20 +145,26 @@ $ cat file.txt | ewc -
 
 ### JSON Mode
 
-- `--json` cannot be combined with `--compact`, `--verbose`, or
-  `--no-color`; none of them affect JSON output, so combining them is
-  rejected at argument parsing rather than silently ignored
-- The output shape depends on how many inputs were given, not on how
-  many succeeded: exactly one input (a single file/directory argument,
-  or stdin) always produces a bare object, whether or not it succeeded;
-  zero or more-than-one inputs always produce the `{"files": [...],
-  "total": {...}}` envelope, even if every input failed
+- `--json` cannot be combined with `--compact` or `--verbose`; neither
+  affects JSON output, so combining them is rejected at argument parsing
+  rather than silently ignored. `--no-color` is still meaningful with
+  `--json`: JSON mode's per-failure warnings go to stderr, not stdout
+  JSON, and `--no-color` suppresses the icon on those
+- Reading from stdin always produces a bare object, whether or not the
+  read succeeded (a failed read reports a zeroed count rather than
+  switching to the multi-input envelope shape). A single file/directory
+  argument that fails, or an invalid `--exclude`/`--include` pattern,
+  still falls back to the `{"files": [...], "total": {...}}` envelope
+  with an empty `files` array; unifying that with stdin's behavior is
+  tracked separately
 - A directory (or the aggregate `total` in the envelope shape) includes
-  a `skipped_count` field when one or more of its entries couldn't be
-  counted (permission denied, vanished mid-walk, etc.), so a consumer
-  parsing only stdout JSON can tell a total is partial. The field is
-  omitted entirely when nothing was skipped, so the common case's shape
-  is unchanged
+  a `skipped_count` field when one or more of its *own* entries couldn't
+  be counted (permission denied, vanished mid-walk, etc.), so a consumer
+  parsing only stdout JSON can tell a directory's total is partial. This
+  does not cover a top-level file/directory argument that failed
+  entirely (that's absent from `files` and only visible via the exit
+  code and stderr). The field is omitted entirely when nothing was
+  skipped, so the common case's shape is unchanged
 
 ### Counting Semantics
 

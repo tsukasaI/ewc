@@ -44,9 +44,13 @@ pub struct Args {
     #[arg(short = 'v', long)]
     pub verbose: bool,
 
-    /// Output in JSON format (--compact, --verbose, and --no-color have no
-    /// effect on JSON output and cannot be combined with it)
-    #[arg(long, conflicts_with_all = ["compact", "verbose", "no_color"])]
+    /// Output in JSON format
+    ///
+    /// --compact and --verbose have no effect on JSON output and cannot be
+    /// combined with it. --no-color is still meaningful: JSON mode's
+    /// per-failure warnings go to stderr, not stdout JSON, and --no-color
+    /// suppresses the icon on those.
+    #[arg(long, conflicts_with_all = ["compact", "verbose"])]
     pub json: bool,
 
     /// Exclude files matching glob pattern (repeatable)
