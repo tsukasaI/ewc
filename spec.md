@@ -60,7 +60,7 @@ $ ewc -v src/
 📄 src/main.rs        45 lines
 📄 src/lib.rs        123 lines
 📄 src/utils.rs       67 lines
-─────────────────────────────
+─────────────────────────
 📁 Total (3 files)   235 lines
 ```
 
@@ -92,6 +92,17 @@ $ ewc src/          # .gitignore, .hidden/ excluded
 $ ewc -a src/       # Include all
 ```
 
+### Symlinks
+
+- Symlinks encountered while walking a directory are not followed, to
+  avoid infinite loops on a cyclic symlink and double-counting a file
+  reachable by more than one path
+- Currently, every symlink (valid or broken) is silently skipped: not
+  counted, not reported. A pending fix (#79) will report a broken symlink
+  as a skipped entry instead, since that reflects a real I/O condition
+  rather than the not-following policy; a symlink to a file/directory that
+  exists will keep being silently skipped once that lands
+
 ### Error Handling
 
 - Non-existent files show error message and continue
@@ -101,12 +112,15 @@ $ ewc -a src/       # Include all
 ```bash
 $ ewc nofile.txt existing.txt
 ⚠️  nofile.txt: No such file or directory
-
 📄 existing.txt
    Lines:      50
    Words:     200
    Bytes:   1,500
 ```
+
+The warning goes to stderr and the file block to stdout; the blank line
+above is only a formatting convenience in this doc, not something the
+program guarantees between the two streams.
 
 ### Standard Input
 
@@ -136,14 +150,17 @@ $ cat file.txt | ewc
   counted without decoding (a byte is counted unless it's a UTF-8
   continuation byte), so it degrades gracefully rather than erroring on
   malformed UTF-8, but it is not display-column width — wide characters
-  (e.g. CJK) still count as 1, unlike GNU `wc -L`.
+  (e.g. CJK) still count as 1, unlike GNU `wc -L`. A CRLF-terminated line
+  also reports one character shorter than BSD `wc -L`: the trailing `\r`
+  is excluded from the count, matching `str::lines()` semantics, whereas
+  BSD `wc -L` counts it.
 
 ## Output Format
 
 ### Number Format
 
 - Comma-separated every 3 digits
-- Right-aligned (6-digit width)
+- Right-aligned (10-character width)
 
 ```
    Lines:      1,234
@@ -171,7 +188,8 @@ ewc/
 │   ├── counter.rs     # Count logic
 │   └── output.rs      # Output formatting
 └── tests/
-    └── integration.rs # Integration tests
+    ├── integration.rs # Integration tests
+    └── benchmark.rs   # Manual performance comparison against `wc`
 ```
 
 ## Advanced Features
@@ -230,6 +248,12 @@ The `--exclude` and `--include` options filter files during directory traversal 
 - `--exclude` takes precedence over `--include`
 - Multiple patterns can be specified (options are repeatable)
 - Patterns match against relative paths from the walk root
+- `*` crosses path separators the same as `**` does (no
+  `literal_separator` distinction): `--exclude "*.md"` also removes
+  `sub/dir/file.md`, not just top-level `.md` files
+- There is no implicit basename matching: `--exclude "Cargo.lock"` does
+  **not** remove `sub/Cargo.lock` (unlike `.gitignore` conventions); write
+  `--exclude "**/Cargo.lock"` or `--exclude "*.lock"` to match at any depth
 
 #### Examples
 
