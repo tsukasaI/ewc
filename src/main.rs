@@ -83,11 +83,29 @@ fn main() {
         // other filename-derived output; --help/--version (use_stderr() is
         // false there) go through clap's own exit() unchanged.
         Err(e) if e.use_stderr() => {
-            let is_tty = io::stderr().is_terminal();
-            for line in e.render().to_string().lines() {
-                eprintln!("{}", sanitize_for_display(line, is_tty));
+            if io::stderr().is_terminal() {
+                // Sanitize argv and re-parse instead of sanitizing clap's
+                // already-rendered text: a raw newline in an argument would
+                // otherwise split into a second line before the per-line
+                // sanitizer ever sees it, forging arbitrary extra output.
+                let clean_args: Vec<String> = std::env::args_os()
+                    .map(|a| sanitize_for_display(&a.to_string_lossy(), true).into_owned())
+                    .collect();
+                match Args::try_parse_from(clean_args) {
+                    Err(clean_err) if clean_err.use_stderr() => clean_err.exit(),
+                    _ => {
+                        // Sanitized argv unexpectedly parsed cleanly (or hit
+                        // help/version); fall back to the original error as a
+                        // fail-closed path, still sanitized line-by-line.
+                        for line in e.render().to_string().lines() {
+                            eprintln!("{}", sanitize_for_display(line, true));
+                        }
+                        process::exit(e.exit_code());
+                    }
+                }
+            } else {
+                e.exit();
             }
-            process::exit(e.exit_code());
         }
         Err(e) => e.exit(),
     };
@@ -303,5 +321,30 @@ fn run_normal_mode(args: &Args, config: &FilterConfig) {
 
     if has_error {
         process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn sanitizing_argv_before_reparse_removes_embedded_newlines() {
+        // A raw newline in an argument, once echoed into clap's rendered
+        // error text, would look like a second, forged line of output. The
+        // fix sanitizes argv *before* clap ever sees it, so the newline
+        // can't reach the parser (and therefore can't reach the rendered
+        // error) in the first place.
+        let malicious = "--bogus\nerror: FORGED LINE";
+        let clean = sanitize_for_display(malicious, true).into_owned();
+        assert!(!clean.contains('\n'));
+
+        let err = Args::try_parse_from(["ewc", &clean]).unwrap_err();
+        let rendered = err.render().to_string();
+        // The forged text can still appear (it's just an odd flag value),
+        // but never as a line of its own: the newline that would have
+        // split it out was replaced before clap ever parsed the argument.
+        assert!(!rendered.contains("\nerror: FORGED LINE"));
     }
 }
