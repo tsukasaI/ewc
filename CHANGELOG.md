@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - `FilterConfig::new` now compiles and validates its glob patterns eagerly, returning `io::Result<Self>`, instead of deferring pattern compilation to each directory walk
 
+### Removed
+
+- `counter::count_directory`; call `count_directory_detailed` and use `entries.len()` for the file count
+
 ## [0.4.0] - 2026-08-14
 
 ### Fixed
