@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `--exclude` now prunes a matching directory from the walk instead of only filtering its files afterward, so an unreadable subdirectory under an excluded prefix is no longer reported as a failure; this also means a bare directory name (e.g. `--exclude target`) now excludes that directory, which was previously a no-op
 - A broken symlink encountered during a directory walk is now reported as a skipped entry and causes a non-zero exit code, like any other skipped entry (previously silently dropped with no effect on the exit code); a symlink to a file/directory that exists is still silently skipped, matching the existing not-following policy
 - An invalid `--exclude`/`--include` glob pattern is now reported once instead of once per directory argument, and is now validated up front even when nothing is walked (stdin or file-only arguments) instead of being silently ignored
-- `-v`'s per-file metric now follows the same flags as every other output mode: e.g. `-v -w -c` now shows words (the first requested metric), instead of always falling back to lines for any flag combination that wasn't lines-only, words-only, bytes-only, or max-only
+- `-v` now honors `-w`/`-c`/`-L` combinations, showing the first requested metric in lines -> words -> bytes -> max order, instead of falling back to lines whenever more than one flag was set without `-l`
 
 ### Changed
 

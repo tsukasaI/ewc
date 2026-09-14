@@ -116,11 +116,9 @@ pub fn format_compact_total(file_count: usize, count: &Count, args: &Args) -> St
     )
 }
 
-// First-enabled-metric lookup, not format_count_lines' display order: verbose
-// mode shows exactly one metric per line, so the order here is which metric
-// wins when more than one flag is set, and it must stay lines -> words ->
-// bytes -> max so e.g. `-v -l -L` keeps printing lines and `-v -L` alone
-// keeps printing max (#53).
+/// First-enabled-metric lookup for verbose mode's one-metric-per-line
+/// display. Lines must stay before words/bytes (so the flagless default
+/// shows lines) and max must stay last (so `-l -L` shows lines, not max).
 fn format_single_count(count: &Count, args: &Args) -> String {
     let (value, unit) = if args.show_lines() {
         (count.lines, "lines")
@@ -284,9 +282,7 @@ mod tests {
 
     #[test]
     fn verbose_single_metric_uses_args_show_helpers() {
-        // Regression test for #53: format_single_count used to match on the
-        // raw flag tuple and silently fall back to "lines" for any
-        // combination that didn't hit one of its three explicit arms.
+        // Regression test for #53.
         let count = Count {
             lines: 1,
             words: 2,
