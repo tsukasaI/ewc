@@ -436,6 +436,39 @@ fn json_flag_directory() {
 }
 
 #[test]
+#[cfg(unix)]
+fn json_directory_reports_skipped_count_when_partial() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("readable.txt"), "hello\n").unwrap();
+    let unreadable = dir.path().join("unreadable.txt");
+    std::fs::write(&unreadable, "secret\n").unwrap();
+    std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    let result = run_ewc(&["--json", dir.path().to_str().unwrap()]);
+
+    let _ = std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o644));
+
+    let parsed: serde_json::Value = serde_json::from_str(&result.stdout).unwrap();
+    if parsed["file_count"] == serde_json::json!(2) {
+        // Running as root bypasses permission checks; nothing to assert.
+        return;
+    }
+    assert!(!result.success);
+    assert_eq!(parsed["skipped_count"], 1);
+}
+
+#[test]
+fn json_directory_omits_skipped_count_when_complete() {
+    let dir = create_test_dir();
+    let result = run_ewc(&["--json", dir.path().to_str().unwrap()]);
+
+    assert!(result.success);
+    assert!(!result.stdout.contains("skipped_count"));
+}
+
+#[test]
 fn json_output_is_valid() {
     let file = create_test_file("hello\n");
     let result = run_ewc(&["--json", file.path().to_str().unwrap()]);
@@ -617,8 +650,11 @@ fn stdin_json_mode_read_failure_prints_valid_json() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value =
         serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
-    assert_eq!(parsed["files"], serde_json::json!([]));
-    assert_eq!(parsed["total"]["file_count"], 0);
+    // Same bare-object shape as a successful stdin run, not the {files,
+    // total} envelope: stdin's JSON shape must not depend on whether
+    // reading it happened to succeed (#85).
+    assert_eq!(parsed["file"], "<stdin>");
+    assert_eq!(parsed["lines"], 0);
 }
 
 #[test]

@@ -94,9 +94,17 @@ fn run_stdin_mode(args: &Args) {
         Err(e) => {
             eprintln!("{}<stdin>: {e}", icon(args.no_color, WARNING_ICON));
             if args.json {
-                // Keep stdout valid JSON even on failure, matching
-                // run_json_mode's all-inputs-failed behavior.
-                println!("{}", format_json_multiple(&[], &Count::default()));
+                // Same bare-object shape as the success path below (a zeroed
+                // Count on failure), not the {files, total} envelope: stdin
+                // is always exactly one input, so its JSON shape shouldn't
+                // depend on whether reading it happened to succeed (#85).
+                let result = JsonFileResult {
+                    name: "<stdin>".to_string(),
+                    count: Count::default(),
+                    kind: OutputKind::File,
+                    skipped_count: 0,
+                };
+                println!("{}", format_json_single(&result));
             }
             process::exit(1);
         }
@@ -107,6 +115,7 @@ fn run_stdin_mode(args: &Args) {
             name: "<stdin>".to_string(),
             count,
             kind: OutputKind::File,
+            skipped_count: 0,
         };
         println!("{}", format_json_single(&result));
     } else if args.compact {
@@ -155,6 +164,7 @@ fn run_json_mode(args: &Args, config: &FilterConfig) {
             name: file.to_string_lossy().into_owned(),
             count: result.count,
             kind,
+            skipped_count: result.skipped.len(),
         });
         total_count += result.count;
     }

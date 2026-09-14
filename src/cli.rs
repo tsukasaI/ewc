@@ -37,15 +37,16 @@ pub struct Args {
     pub all: bool,
 
     /// Compact one-line output format
-    #[arg(short = 'C', long)]
+    #[arg(short = 'C', long, conflicts_with = "verbose")]
     pub compact: bool,
 
     /// Show file list for directories
     #[arg(short = 'v', long)]
     pub verbose: bool,
 
-    /// Output in JSON format
-    #[arg(long)]
+    /// Output in JSON format (--compact, --verbose, and --no-color have no
+    /// effect on JSON output and cannot be combined with it)
+    #[arg(long, conflicts_with_all = ["compact", "verbose", "no_color"])]
     pub json: bool,
 
     /// Exclude files matching glob pattern (repeatable)

@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Non-UTF-8 filenames are no longer rejected at argument parsing; they're now accepted and counted like `wc` does, with invalid byte sequences rendered as U+FFFD in output
 - A single bare `-` argument now reads from stdin, matching `wc`, instead of being treated as a literal filename
 - `--no-color` now also suppresses the warning icon on stderr; previously it only applied to the file/directory icons on stdout
+- `--json` reading from stdin now emits the same bare-object shape on a read failure as it does on success (previously it flipped to the `{files, total}` envelope on failure)
+- `--json` now rejects `--compact`, `--verbose`, and `--no-color` at argument parsing instead of silently ignoring them (none of them affect JSON output); `-v` and `-C` are now also mutually exclusive with each other
+- JSON output for a directory (and the aggregate total in the multi-input envelope) now includes a `skipped_count` field when one or more entries couldn't be counted, so a consumer parsing only stdout JSON can tell a total is partial. Omitted when nothing was skipped
 
 ### Changed
 

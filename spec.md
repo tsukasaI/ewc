@@ -76,7 +76,7 @@ $ ewc -v src/
 | `--all` | `-a` | Include hidden files/directories |
 | `--compact` | `-C` | Single-line output |
 | `--no-color` | - | Disable icons |
-| `--json` | - | JSON output |
+| `--json` | - | JSON output (cannot be combined with `--compact`, `--verbose`, or `--no-color`, which have no meaning for JSON) |
 | `--exclude` | - | Exclude files matching glob pattern (repeatable) |
 | `--include` | - | Include only files matching glob pattern (repeatable) |
 
@@ -142,6 +142,23 @@ $ cat file.txt | ewc -
    Words:     200
    Bytes:   1,500
 ```
+
+### JSON Mode
+
+- `--json` cannot be combined with `--compact`, `--verbose`, or
+  `--no-color`; none of them affect JSON output, so combining them is
+  rejected at argument parsing rather than silently ignored
+- The output shape depends on how many inputs were given, not on how
+  many succeeded: exactly one input (a single file/directory argument,
+  or stdin) always produces a bare object, whether or not it succeeded;
+  zero or more-than-one inputs always produce the `{"files": [...],
+  "total": {...}}` envelope, even if every input failed
+- A directory (or the aggregate `total` in the envelope shape) includes
+  a `skipped_count` field when one or more of its entries couldn't be
+  counted (permission denied, vanished mid-walk, etc.), so a consumer
+  parsing only stdout JSON can tell a total is partial. The field is
+  omitted entirely when nothing was skipped, so the common case's shape
+  is unchanged
 
 ### Counting Semantics
 
