@@ -97,10 +97,11 @@ $ ewc -a src/       # Include all
 - Symlinks encountered while walking a directory are not followed, to
   avoid infinite loops on a cyclic symlink and double-counting a file
   reachable by more than one path
-- A symlink pointing at an existing file or directory is silently skipped
-  (not counted, not reported)
-- A broken symlink (pointing at a path that no longer exists) is reported
-  as a skipped entry, the same as any other I/O failure during the walk
+- Currently, every symlink (valid or broken) is silently skipped: not
+  counted, not reported. A pending fix (#79) will report a broken symlink
+  as a skipped entry instead, since that reflects a real I/O condition
+  rather than the not-following policy; a symlink to a file/directory that
+  exists will keep being silently skipped once that lands
 
 ### Error Handling
 

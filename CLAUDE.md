@@ -3,11 +3,14 @@
 `ewc` (Enhanced Word Count) is a Rust CLI, a modern `wc` alternative with
 human-readable output, JSON, glob include/exclude, and parallel directory
 scanning. ~1.8k LOC (`src/`) + ~600 LOC tests (`tokei`). Published on
-crates.io and a Nix flake — current version `0.4.0` (`Cargo.toml`,
-`flake.nix`). No Homebrew tap exists; the README section that referenced
-one was removed (#75). `Formula/ewc.rb` is stale and pending removal
-(the fix is a plain file deletion, tracked separately) rather than a fix,
-since standing up a real tap is outside this repo's scope.
+crates.io and a Nix flake — current version `0.4.0` (`Cargo.toml`;
+`flake.nix` derives it from there via `builtins.fromTOML`). No Homebrew
+tap exists; the README section that referenced one was removed (#75).
+`Formula/ewc.rb` is stale and pending removal (a plain file deletion,
+tracked separately) rather than a fix, since standing up a real tap is
+outside this repo's scope. `cliff.toml` is similarly stale and tracked
+for the same pending deletion (#82); until then, both stay in
+`Cargo.toml`'s `exclude` list so neither ships in the published crate.
 
 ## Dev environment
 
@@ -47,8 +50,8 @@ if either changes.
   linux (x86_64/aarch64), macOS (x86_64/aarch64), windows (x86_64),
   generates a `SHA256SUMS` asset, attests build provenance, and publishes
   release notes via GitHub's own `generate_release_notes`. `CHANGELOG.md` is
-  maintained by hand (Keep a Changelog format); there is no `git-cliff`
-  wiring in this repo.
+  maintained by hand (Keep a Changelog format); no workflow reads
+  `cliff.toml`, which is stale and pending deletion (#82).
 - `.github/workflows/ci.yml`: separate `check`/`test`/`clippy`/`fmt` jobs.
 - All GitHub Actions are pinned to commit SHAs, not tags (commit `c651d74`,
   `decision(ci)`: mitigate tag-repointing supply-chain attacks like the
