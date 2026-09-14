@@ -50,13 +50,6 @@ $ ewc src/*.rs
 
 ## Installation
 
-### Homebrew
-
-```bash
-brew tap tsukasaI/ewc
-brew install ewc
-```
-
 ### Nix
 
 ```bash
