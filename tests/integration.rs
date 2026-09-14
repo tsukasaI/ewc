@@ -584,6 +584,65 @@ fn stdin_json_mode_read_failure_prints_valid_json() {
 }
 
 #[test]
+fn dash_argument_reads_stdin() {
+    let result = run_ewc_with_stdin(&["-"], "hello world\n");
+
+    assert!(result.success);
+    assert!(result.stdout.contains("<stdin>"));
+    assert!(result.stdout.contains("Lines:"));
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn non_utf8_filename_is_accepted_at_argv() {
+    // macOS's filesystem (APFS/HFS+) rejects non-UTF-8 filenames outright,
+    // so this is only reproducible on Linux, where ext4 et al. accept
+    // arbitrary bytes.
+    use std::os::unix::ffi::OsStrExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    // 0xFF is not valid UTF-8 anywhere; a String-typed argv would have
+    // rejected this file before ewc ever saw it (#69).
+    let name = std::ffi::OsStr::from_bytes(b"bad\xFFname.txt");
+    let path = dir.path().join(name);
+    std::fs::write(&path, "hello world\n").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_ewc"))
+        .arg(&path)
+        .output()
+        .expect("failed to run ewc");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Lines:"));
+    // The name is displayed lossily (invalid bytes become U+FFFD) rather
+    // than causing a failure.
+    assert!(stdout.contains("bad\u{FFFD}name.txt"));
+}
+
+#[test]
+#[cfg(unix)]
+fn non_utf8_argv_reaches_ewc_instead_of_being_rejected_by_the_parser() {
+    // Unlike the filesystem test above, this needs no file to exist: it only
+    // checks that clap's argument parser accepts the non-UTF-8 byte at all
+    // (a String-typed argv rejects it with exit code 2 before ewc runs), so
+    // it also covers macOS, where creating such a file is not possible.
+    use std::os::unix::ffi::OsStrExt;
+
+    let name = std::ffi::OsStr::from_bytes(b"bad\xFFname.txt");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_ewc"))
+        .arg(name)
+        .output()
+        .expect("failed to run ewc");
+
+    assert_eq!(output.status.code(), Some(1)); // not found, not a parse error
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("bad\u{FFFD}name.txt"));
+    assert!(!stderr.contains("invalid UTF-8"));
+}
+
+#[test]
 fn directory_and_nonexistent_file() {
     let dir = create_test_dir();
     let result = run_ewc(&[dir.path().to_str().unwrap(), "nonexistent.txt"]);

@@ -1,4 +1,5 @@
 use clap::Parser;
+use std::path::PathBuf;
 
 #[derive(Parser, Debug, Default)]
 #[command(
@@ -9,7 +10,7 @@ use clap::Parser;
 pub struct Args {
     /// Files to process
     #[arg(value_name = "FILE")]
-    pub files: Vec<String>,
+    pub files: Vec<PathBuf>,
 
     /// Show line count only
     #[arg(short = 'l', long)]
