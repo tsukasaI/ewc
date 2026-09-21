@@ -343,6 +343,19 @@ fn compact_flag_single_file() {
 }
 
 #[test]
+fn compact_flag_directory_has_single_space_before_counts() {
+    // Regression test for #48: the directory header used to carry a
+    // trailing space before format_compact_counts added its own leading
+    // space, doubling up after "(N files):". File headers never had this
+    // bug; this pins that directories now match.
+    let dir = create_test_dir();
+    let result = run_ewc(&["-C", dir.path().to_str().unwrap()]);
+
+    assert!(result.success);
+    assert!(!result.stdout.contains("):  "));
+}
+
+#[test]
 fn compact_flag_multiple_files() {
     let file1 = create_test_file("hello\n");
     let file2 = create_test_file("world\n");
