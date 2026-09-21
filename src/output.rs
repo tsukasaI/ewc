@@ -43,24 +43,31 @@ pub fn format_number(n: u64) -> String {
         .join(",")
 }
 
-fn format_count_lines(count: &Count, args: &Args) -> Vec<String> {
-    let mut lines = Vec::new();
+/// Active metrics in fixed display order: max line length, lines, words,
+/// bytes. `label` is the aligned-output name (padded to width 8 by the
+/// caller); `unit` is the compact-output suffix.
+fn selected_metrics(count: &Count, args: &Args) -> Vec<(&'static str, &'static str, u64)> {
+    let mut metrics = Vec::new();
     if args.show_max_line_length() {
-        lines.push(format!(
-            "Max Line: {:>10}",
-            format_number(count.max_line_length)
-        ));
+        metrics.push(("Max Line", "max", count.max_line_length));
     }
     if args.show_lines() {
-        lines.push(format!("   Lines: {:>10}", format_number(count.lines)));
+        metrics.push(("Lines", "lines", count.lines));
     }
     if args.show_words() {
-        lines.push(format!("   Words: {:>10}", format_number(count.words)));
+        metrics.push(("Words", "words", count.words));
     }
     if args.show_bytes() {
-        lines.push(format!("   Bytes: {:>10}", format_number(count.bytes)));
+        metrics.push(("Bytes", "bytes", count.bytes));
     }
-    lines
+    metrics
+}
+
+fn format_count_lines(count: &Count, args: &Args) -> Vec<String> {
+    selected_metrics(count, args)
+        .into_iter()
+        .map(|(label, _, value)| format!("{label:>8}: {:>10}", format_number(value)))
+        .collect()
 }
 
 fn pluralize_files(count: usize) -> &'static str {
@@ -113,20 +120,20 @@ pub fn format_separator() -> &'static str {
 }
 
 fn format_compact_counts(count: &Count, args: &Args) -> String {
-    let mut parts = Vec::new();
-    if args.show_max_line_length() {
-        parts.push(format!("max:{}", format_number(count.max_line_length)));
-    }
-    if args.show_lines() {
-        parts.push(format!("{} lines", format_number(count.lines)));
-    }
-    if args.show_words() {
-        parts.push(format!("{} words", format_number(count.words)));
-    }
-    if args.show_bytes() {
-        parts.push(format!("{} bytes", format_number(count.bytes)));
-    }
-    parts.join(", ")
+    selected_metrics(count, args)
+        .into_iter()
+        .map(|(_, unit, value)| {
+            let n = format_number(value);
+            // Max line length is the one metric rendered as a prefix, not a
+            // suffix, matching its pre-extraction "max:N" form.
+            if unit == "max" {
+                format!("max:{n}")
+            } else {
+                format!("{n} {unit}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 pub fn format_compact_output(
