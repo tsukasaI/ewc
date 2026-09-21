@@ -465,6 +465,28 @@ fn verbose_flag_not_applicable_to_single_file() {
 }
 
 #[test]
+fn verbose_flag_mixes_directory_and_file_arguments() {
+    // Regression test for #39: run_normal_mode's directory/file bookkeeping
+    // (blank-line separation, total aggregation) is shared code now, so a
+    // run mixing a verbose directory block with a normal file block in
+    // either order must still separate and total them correctly.
+    let dir = create_test_dir();
+    let file = create_test_file("solo line\n");
+
+    let result = run_ewc(&[
+        "-v",
+        dir.path().to_str().unwrap(),
+        file.path().to_str().unwrap(),
+    ]);
+
+    assert!(result.success);
+    assert!(result.stdout.contains("file1.txt"));
+    assert!(result.stdout.contains("Lines:")); // the plain file block
+    assert!(result.stdout.contains("Total (3 files)")); // 2 in dir + 1 file
+    assert!(!result.stdout.contains("\n\n\n"));
+}
+
+#[test]
 fn verbose_with_no_color() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("file1.txt"), "hello\n").unwrap();
