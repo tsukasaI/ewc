@@ -465,6 +465,46 @@ fn verbose_flag_not_applicable_to_single_file() {
 }
 
 #[test]
+fn verbose_flag_mixes_directory_and_file_arguments() {
+    // Regression test for #39: run_normal_mode's directory/file bookkeeping
+    // (blank-line separation, total aggregation) is shared code now, so a
+    // run mixing a verbose directory block with a normal file block in
+    // either order must still separate and total them correctly.
+    let dir = create_test_dir();
+    let file = create_test_file("solo line\n");
+
+    let dir_then_file = run_ewc(&[
+        "-v",
+        dir.path().to_str().unwrap(),
+        file.path().to_str().unwrap(),
+    ]);
+
+    assert!(dir_then_file.success);
+    assert!(dir_then_file.stdout.contains("file1.txt"));
+    assert!(dir_then_file.stdout.contains("Lines:")); // the plain file block
+    assert!(dir_then_file.stdout.contains("Total (3 files)")); // 2 in dir + 1 file
+    assert!(dir_then_file.stdout.contains("\n\n")); // blocks are separated
+    assert!(!dir_then_file.stdout.contains("\n\n\n"));
+
+    // Reversed order: the normal-file branch runs first and its
+    // needs_leading_blank flag must still be read correctly by the
+    // following verbose-directory block, the direction of cross-branch
+    // coupling this dedup specifically removes.
+    let file_then_dir = run_ewc(&[
+        "-v",
+        file.path().to_str().unwrap(),
+        dir.path().to_str().unwrap(),
+    ]);
+
+    assert!(file_then_dir.success);
+    assert!(file_then_dir.stdout.contains("file1.txt"));
+    assert!(file_then_dir.stdout.contains("Lines:"));
+    assert!(file_then_dir.stdout.contains("Total (3 files)"));
+    assert!(file_then_dir.stdout.contains("\n\n"));
+    assert!(!file_then_dir.stdout.contains("\n\n\n"));
+}
+
+#[test]
 fn verbose_with_no_color() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("file1.txt"), "hello\n").unwrap();

@@ -6,7 +6,8 @@ use std::process;
 
 use ewc::cli::Args;
 use ewc::counter::{
-    count_directory_detailed, count_file, count_from_reader, Count, FilterConfig, SkippedEntry,
+    count_directory_detailed, count_file, count_from_reader, Count, FileEntry, FilterConfig,
+    SkippedEntry,
 };
 use ewc::output::{
     format_compact_output, format_compact_total, format_json_error, format_json_multiple,
@@ -21,25 +22,55 @@ struct ProcessResult {
     file_count: usize,
     skipped: Vec<SkippedEntry>,
     is_directory: bool,
+    /// `Some` only for a directory processed with `verbose: true`; carries
+    /// the per-file breakdown format_verbose_output needs. `None` for a
+    /// file, or for a directory processed without --verbose, where only
+    /// the aggregate count/file_count are needed.
+    entries: Option<Vec<FileEntry>>,
 }
 
-fn process_path(path: &Path, config: &FilterConfig) -> io::Result<ProcessResult> {
-    if path.is_dir() {
-        let (entries, count, skipped) = count_directory_detailed(path, config)?;
-        Ok(ProcessResult {
-            count,
-            file_count: entries.len(),
-            skipped,
-            is_directory: true,
-        })
-    } else {
-        let count = count_file(path)?;
-        Ok(ProcessResult {
-            count,
+fn process_path(path: &Path, config: &FilterConfig, verbose: bool) -> io::Result<ProcessResult> {
+    if !path.is_dir() {
+        return Ok(ProcessResult {
+            count: count_file(path)?,
             file_count: 1,
             skipped: Vec::new(),
             is_directory: false,
-        })
+            entries: None,
+        });
+    }
+
+    let (entries, count, skipped) = count_directory_detailed(path, config)?;
+    Ok(ProcessResult {
+        count,
+        file_count: entries.len(),
+        skipped,
+        is_directory: true,
+        entries: verbose.then_some(entries),
+    })
+}
+
+/// Formats a processed argument's output line(s): the per-file verbose
+/// breakdown when `result.entries` is set, otherwise the normal or compact
+/// single-block form.
+fn format_process_result(
+    name: &str,
+    result: &ProcessResult,
+    args: &Args,
+    is_terminal: bool,
+) -> String {
+    if let Some(entries) = &result.entries {
+        return format_verbose_output(entries, &result.count, args, is_terminal);
+    }
+    let kind = if result.is_directory {
+        OutputKind::Directory(result.file_count)
+    } else {
+        OutputKind::File
+    };
+    if args.compact {
+        format_compact_output(name, &result.count, kind, args, is_terminal)
+    } else {
+        format_output(name, &result.count, kind, args, is_terminal)
     }
 }
 
@@ -283,7 +314,7 @@ fn run_json_mode(args: &Args, config: &FilterConfig) -> io::Result<bool> {
 
     for file in &args.files {
         let path = file.as_path();
-        let result = match process_path(path, config) {
+        let result = match process_path(path, config, false) {
             Ok(result) => result,
             Err(e) => {
                 if args.files.len() == 1 {
@@ -349,67 +380,33 @@ fn run_normal_mode(args: &Args, config: &FilterConfig) -> io::Result<bool> {
 
     for file in &args.files {
         let path = file.as_path();
-
-        if path.is_dir() && args.verbose {
-            match count_directory_detailed(path, config) {
-                Ok((entries, dir_total, skipped)) => {
-                    if needs_leading_blank {
-                        writeln!(out)?;
-                    }
-                    writeln!(
-                        out,
-                        "{}",
-                        format_verbose_output(&entries, &dir_total, args, is_terminal)
-                    )?;
-
-                    if report_skipped(&mut err, &skipped, args.no_color)? {
-                        has_error = true;
-                    }
-
-                    total_count += dir_total;
-                    total_file_count += entries.len();
-                    successful_args += 1;
-                    needs_leading_blank = !args.compact;
-                }
-                Err(e) => {
-                    warn_file_error(&mut err, file, &e, args.no_color)?;
-                    has_error = true;
-                }
+        let result = match process_path(path, config, args.verbose) {
+            Ok(result) => result,
+            Err(e) => {
+                warn_file_error(&mut err, file, &e, args.no_color)?;
+                has_error = true;
+                continue;
             }
-        } else {
-            match process_path(path, config) {
-                Ok(result) => {
-                    let kind = if result.is_directory {
-                        OutputKind::Directory(result.file_count)
-                    } else {
-                        OutputKind::File
-                    };
-                    let name = file.to_string_lossy();
-                    let output = if args.compact {
-                        format_compact_output(&name, &result.count, kind, args, is_terminal)
-                    } else {
-                        format_output(&name, &result.count, kind, args, is_terminal)
-                    };
-                    if needs_leading_blank {
-                        writeln!(out)?;
-                    }
-                    writeln!(out, "{output}")?;
+        };
 
-                    if report_skipped(&mut err, &result.skipped, args.no_color)? {
-                        has_error = true;
-                    }
-
-                    total_count += result.count;
-                    total_file_count += result.file_count;
-                    successful_args += 1;
-                    needs_leading_blank = !args.compact;
-                }
-                Err(e) => {
-                    warn_file_error(&mut err, file, &e, args.no_color)?;
-                    has_error = true;
-                }
-            }
+        let name = file.to_string_lossy();
+        if needs_leading_blank {
+            writeln!(out)?;
         }
+        writeln!(
+            out,
+            "{}",
+            format_process_result(&name, &result, args, is_terminal)
+        )?;
+
+        if report_skipped(&mut err, &result.skipped, args.no_color)? {
+            has_error = true;
+        }
+
+        total_count += result.count;
+        total_file_count += result.file_count;
+        successful_args += 1;
+        needs_leading_blank = !args.compact;
     }
 
     if successful_args > 1 {
