@@ -206,7 +206,10 @@ fn main() {
         // output to the dead pipe.
         Err(e) if e.kind() == io::ErrorKind::BrokenPipe => process::exit(141),
         Err(e) => {
-            eprintln!("ewc: {e}");
+            // Best-effort, matching the other top-level error paths: if
+            // stderr is itself unwritable here there is no further action
+            // to take, and panicking would defeat the point of this match.
+            let _ = writeln!(io::stderr(), "ewc: {e}");
             process::exit(1);
         }
     }
