@@ -45,8 +45,11 @@ skip was removed.
 **README.md is user-facing truth. `spec.md` is the original design doc.**
 As of this writing, `spec.md`'s options table, behavior notes, Project
 Structure, and JSON example match the actual clap flags in `src/cli.rs`,
-README, and `src/output.rs`'s formatting (width, separator length) — no
-drift found on this pass (#83, #93 fixed several). When docs disagree with
+README, and `src/output.rs`'s formatting (width, separator length) — #83 and
+#93 fixed several drifts, and #37 fixed one more (`--no-color`'s clap help
+text still promised "Disable colors and icons" after colored output was
+removed in #19; it now reads "Disable icons", matching README.md and
+spec.md, which already described the real behavior). When docs disagree with
 code, code wins — re-diff `spec.md` against `src/cli.rs` and `src/output.rs`
 if either changes.
 

@@ -28,7 +28,7 @@ pub struct Args {
     #[arg(short = 'L', long)]
     pub max_line_length: bool,
 
-    /// Disable colors and icons
+    /// Disable icons
     #[arg(long)]
     pub no_color: bool,
 
