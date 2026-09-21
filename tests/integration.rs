@@ -237,6 +237,28 @@ fn no_color_flag_removes_warning_icon_on_invalid_glob() {
 }
 
 #[test]
+fn invalid_glob_rejected_with_a_valid_file_argument() {
+    // Regression test for #45: an invalid --exclude/--include pattern must
+    // be rejected the same way regardless of whether any argument is a
+    // directory.
+    let file = create_test_file("hello\n");
+    let result = run_ewc(&["--exclude", "[", file.path().to_str().unwrap()]);
+
+    assert!(!result.success);
+    assert!(result.stderr.contains("Invalid glob pattern"));
+}
+
+#[test]
+fn invalid_glob_rejected_on_stdin() {
+    // Same as invalid_glob_rejected_with_a_valid_file_argument, but for
+    // stdin mode, which also never used to reach glob compilation.
+    let result = run_ewc_with_stdin(&["--exclude", "["], "hello\n");
+
+    assert!(!result.success);
+    assert!(result.stderr.contains("Invalid glob pattern"));
+}
+
+#[test]
 #[cfg(unix)]
 fn no_color_flag_removes_warning_icon_on_skipped_entry() {
     use std::os::unix::fs::PermissionsExt;
@@ -358,6 +380,27 @@ fn verbose_flag_shows_file_list() {
     assert!(result.stdout.contains("file1.txt"));
     assert!(result.stdout.contains("file2.txt"));
     assert!(result.stdout.contains("Total"));
+}
+
+#[test]
+fn verbose_flag_shows_all_selected_metrics_not_just_the_first() {
+    // Regression test for #44: -v with two or more metric flags used to
+    // silently show only the first-matching one, dropping every other
+    // requested metric.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("file1.txt"), "hello world\n").unwrap();
+
+    let result = run_ewc(&["-v", "-w", "-c", dir.path().to_str().unwrap()]);
+
+    assert!(result.success);
+    let file_line = result
+        .stdout
+        .lines()
+        .find(|l| l.contains("file1.txt"))
+        .expect("output must include the file's line");
+    assert!(file_line.contains("words"));
+    assert!(file_line.contains("bytes"));
+    assert!(!file_line.contains("lines"));
 }
 
 #[test]
@@ -493,13 +536,21 @@ fn run_ewc_with_stdin(args: &[&str], stdin_content: &str) -> CommandResult {
         .spawn()
         .expect("failed to spawn ewc");
 
-    // Write to stdin and drop handle to send EOF
-    child
+    // Write to stdin and drop handle to send EOF. A child that rejects its
+    // arguments before ever reading stdin (e.g. an invalid --exclude
+    // pattern) may already have exited by the time this write happens,
+    // since Rust ignores SIGPIPE and turns it into an ordinary write
+    // error instead -- that's expected here, not a real failure.
+    match child
         .stdin
         .take()
         .unwrap()
         .write_all(stdin_content.as_bytes())
-        .unwrap();
+    {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {}
+        Err(e) => panic!("failed to write to ewc's stdin: {e}"),
+    }
 
     let output = child.wait_with_output().unwrap();
     CommandResult {

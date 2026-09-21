@@ -162,20 +162,21 @@ pub fn format_compact_total(file_count: usize, count: &Count, args: &Args) -> St
     )
 }
 
-/// First-enabled-metric lookup for verbose mode's one-metric-per-line
-/// display. Lines must stay before words/bytes (so the flagless default
-/// shows lines) and max must stay last (so `-l -L` shows lines, not max).
+/// Verbose mode's one-line-per-file metric display. Unlike the non-verbose
+/// formatters, the flagless default shows lines only, not every metric, so
+/// `show_all()` is checked explicitly before consulting `selected_metrics`.
+/// With one or more metric flags given, every requested metric is shown,
+/// via the same selected_metrics list the non-verbose formatters use.
 fn format_single_count(count: &Count, args: &Args) -> String {
-    let (value, unit) = if args.show_lines() {
-        (count.lines, "lines")
-    } else if args.show_words() {
-        (count.words, "words")
-    } else if args.show_bytes() {
-        (count.bytes, "bytes")
-    } else {
-        (count.max_line_length, "max")
-    };
-    format!("{} {unit}", format_number(value))
+    if args.show_all() {
+        return format!("{} lines", format_number(count.lines));
+    }
+
+    selected_metrics(count, args)
+        .into_iter()
+        .map(|(_, unit, value)| format!("{} {unit}", format_number(value)))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn format_verbose_entry(entry: &FileEntry, args: &Args, is_terminal: bool) -> String {
@@ -440,8 +441,8 @@ mod tests {
     }
 
     #[test]
-    fn verbose_single_metric_uses_args_show_helpers() {
-        // Regression test for #53.
+    fn verbose_shows_every_requested_metric() {
+        // Regression test for #53, #44.
         let count = Count {
             lines: 1,
             words: 2,
@@ -450,8 +451,8 @@ mod tests {
         };
         let entries = single_entry(count);
 
-        // -w -c (no -l): must show the first requested metric (words), not
-        // fall back to lines.
+        // -w -c (no -l): must show both requested metrics, not fall back to
+        // lines and not drop either one.
         let args = Args {
             words: true,
             bytes: true,
@@ -459,6 +460,7 @@ mod tests {
         };
         let output = format_verbose_output(&entries, &count, &args, false);
         assert!(output.contains("2 words"));
+        assert!(output.contains("3 bytes"));
         assert!(!output.contains("1 lines"));
 
         // -L alone: must show max, not fall back to lines.
@@ -470,7 +472,7 @@ mod tests {
         assert!(output.contains("4 max"));
         assert!(!output.contains("1 lines"));
 
-        // -l -L: lines wins even though max is also requested.
+        // -l -L: both requested metrics must show (#44).
         let args = Args {
             lines: true,
             max_line_length: true,
@@ -478,7 +480,7 @@ mod tests {
         };
         let output = format_verbose_output(&entries, &count, &args, false);
         assert!(output.contains("1 lines"));
-        assert!(!output.contains("4 max"));
+        assert!(output.contains("4 max"));
     }
 
     #[test]
