@@ -299,6 +299,23 @@ pub fn format_json_single(result: &JsonFileResult) -> String {
     serde_json::to_string(&json_entry(result)).expect("JsonEntry serialization cannot fail")
 }
 
+#[derive(Serialize)]
+struct JsonError<'a> {
+    file: &'a str,
+    error: &'a str,
+}
+
+/// The JSON shape for a single input that could not be opened/read at all,
+/// used both by stdin (always exactly one input) and by a single
+/// file/directory argument (#46, #108). Does not cover a directory that
+/// opened but had some of its own entries skipped (permission denied,
+/// vanished mid-walk, etc.); that partial case still succeeds and reports
+/// via `skipped_count` on the normal directory shape.
+pub fn format_json_error(name: &str, error: &str) -> String {
+    serde_json::to_string(&JsonError { file: name, error })
+        .expect("JsonError serialization cannot fail")
+}
+
 pub fn format_json_multiple(results: &[JsonFileResult], total: &Count) -> String {
     let files: Vec<JsonEntry> = results.iter().map(json_entry).collect();
     let total_file_count: usize = results
