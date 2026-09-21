@@ -163,13 +163,14 @@ $ cat file.txt | ewc -
   rather than silently ignored. `--no-color` is still meaningful with
   `--json`: JSON mode's per-failure warnings go to stderr, not stdout
   JSON, and `--no-color` suppresses the icon on those
-- Reading from stdin always produces a bare object, whether or not the
-  read succeeded (a failed read reports a zeroed count rather than
-  switching to the multi-input envelope shape). A single file/directory
-  argument that fails, or an invalid `--exclude`/`--include` pattern,
-  still falls back to the `{"files": [...], "total": {...}}` envelope
-  with an empty `files` array; unifying that with stdin's behavior is
-  tracked separately (#108)
+- Exactly one input -- stdin, or a single file/directory argument -- that
+  fails entirely emits the same single-object error shape,
+  `{"file": "<name>", "error": "<message>"}`, rather than either a fake
+  zeroed-count success object or the `{"files": [...], "total": {...}}`
+  envelope with an empty `files` array (#46, #108). Reading from stdin
+  always produces a single object either way (this error shape on
+  failure, the normal `{"file": "<stdin>", ...}` shape on success), since
+  stdin is always exactly one input.
 - A directory (or the aggregate `total` in the envelope shape) includes
   a `skipped_count` field when one or more of its *own* entries couldn't
   be counted (permission denied, vanished mid-walk, etc.), so a consumer

@@ -9,9 +9,9 @@ use ewc::counter::{
     count_directory_detailed, count_file, count_from_reader, Count, FilterConfig, SkippedEntry,
 };
 use ewc::output::{
-    format_compact_output, format_compact_total, format_json_multiple, format_json_single,
-    format_output, format_separator, format_total_output, format_verbose_output, icon,
-    sanitize_for_display, JsonFileResult, OutputKind,
+    format_compact_output, format_compact_total, format_json_error, format_json_multiple,
+    format_json_single, format_output, format_separator, format_total_output,
+    format_verbose_output, icon, sanitize_for_display, JsonFileResult, OutputKind,
 };
 
 const WARNING_ICON: &str = "\u{26A0}\u{FE0F}  ";
@@ -225,17 +225,12 @@ fn run_stdin_mode(args: &Args) -> io::Result<bool> {
         Err(e) => {
             writeln!(err, "{}<stdin>: {e}", icon(args.no_color, WARNING_ICON))?;
             if args.json {
-                // Same bare-object shape as the success path below (a zeroed
-                // Count on failure), not the {files, total} envelope: stdin
-                // is always exactly one input, so its JSON shape shouldn't
-                // depend on whether reading it happened to succeed (#85).
-                let result = JsonFileResult {
-                    name: "<stdin>".to_string(),
-                    count: Count::default(),
-                    kind: OutputKind::File,
-                    skipped_count: 0,
-                };
-                writeln!(out, "{}", format_json_single(&result))?;
+                // A real error object, not the {files, total} envelope and
+                // not a fake zeroed-count success object: stdin is always
+                // exactly one input, so its JSON failure shape is the same
+                // one a single failing file/directory argument uses (#46,
+                // #108).
+                writeln!(out, "{}", format_json_error("<stdin>", &e.to_string()))?;
             }
             return Ok(true);
         }
@@ -271,12 +266,19 @@ fn run_json_mode(args: &Args, config: &FilterConfig) -> io::Result<bool> {
     let mut results: Vec<JsonFileResult> = Vec::new();
     let mut total_count = Count::default();
     let mut has_error = false;
+    // Set only when the single argument (if there is exactly one) fails,
+    // so a single-argument failure can emit the same error shape stdin
+    // uses instead of falling back to the multi-input envelope (#46, #108).
+    let mut single_arg_error: Option<String> = None;
 
     for file in &args.files {
         let path = file.as_path();
         let result = match process_path(path, config) {
             Ok(result) => result,
             Err(e) => {
+                if args.files.len() == 1 {
+                    single_arg_error = Some(e.to_string());
+                }
                 warn_file_error(&mut err, file, &e, args.no_color)?;
                 has_error = true;
                 continue;
@@ -306,10 +308,18 @@ fn run_json_mode(args: &Args, config: &FilterConfig) -> io::Result<bool> {
     // args) would return the bare single-object shape while
     // `ewc --json bad1.txt bad2.txt` (0 successes) returns the {files,
     // total} envelope — an unpredictable schema for a pipe consumer that
-    // can't know success counts ahead of time (#27).
-    match (args.files.len(), results.as_slice()) {
-        (1, [single]) => writeln!(out, "{}", format_json_single(single))?,
-        _ => writeln!(out, "{}", format_json_multiple(&results, &total_count))?,
+    // can't know success counts ahead of time (#27). A single argument that
+    // failed entirely gets the same error-object shape stdin's read
+    // failure uses, rather than the multi-input envelope with an empty
+    // `files` array (#46, #108).
+    if let Some(error) = single_arg_error {
+        let name = args.files[0].to_string_lossy();
+        writeln!(out, "{}", format_json_error(&name, &error))?;
+    } else {
+        match (args.files.len(), results.as_slice()) {
+            (1, [single]) => writeln!(out, "{}", format_json_single(single))?,
+            _ => writeln!(out, "{}", format_json_multiple(&results, &total_count))?,
+        }
     }
 
     Ok(has_error)

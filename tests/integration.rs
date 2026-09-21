@@ -595,6 +595,24 @@ fn json_mode_continues_after_error() {
 }
 
 #[test]
+fn json_mode_single_failing_file_argument_uses_error_shape_not_envelope() {
+    // Regression test for #46/#108: a single failing file/directory
+    // argument used to fall back to the {files, total} envelope with an
+    // empty files array; it must now use the same error-object shape
+    // stdin's read failure uses.
+    let result = run_ewc(&["--json", "nonexistent.txt"]);
+
+    assert!(!result.success);
+    assert!(result.stderr.contains("nonexistent.txt"));
+
+    let parsed: serde_json::Value =
+        serde_json::from_str(result.stdout.trim()).expect("stdout must be valid JSON");
+    assert_eq!(parsed["file"], "nonexistent.txt");
+    assert!(parsed.get("error").is_some());
+    assert!(parsed.get("files").is_none());
+}
+
+#[test]
 fn json_mode_all_inputs_failing_prints_valid_json_and_reports_errors() {
     let result = run_ewc(&["--json", "nonexistent1.txt", "nonexistent2.txt"]);
 
@@ -650,11 +668,12 @@ fn stdin_json_mode_read_failure_prints_valid_json() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value =
         serde_json::from_str(stdout.trim()).expect("stdout must be valid JSON");
-    // Same bare-object shape as a successful stdin run, not the {files,
-    // total} envelope: stdin's JSON shape must not depend on whether
-    // reading it happened to succeed (#85).
+    // A real error object, not a fake zeroed-count success object and not
+    // the {files, total} envelope: unified with a single failing
+    // file/directory argument's shape (#46, #108).
     assert_eq!(parsed["file"], "<stdin>");
-    assert_eq!(parsed["lines"], 0);
+    assert!(parsed.get("error").is_some());
+    assert!(parsed.get("lines").is_none());
 }
 
 #[test]

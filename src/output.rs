@@ -298,6 +298,26 @@ pub fn format_json_single(result: &JsonFileResult) -> String {
     serde_json::to_string(&json_entry(result)).expect("JsonEntry serialization cannot fail")
 }
 
+#[derive(Serialize)]
+struct JsonError<'a> {
+    file: &'a str,
+    error: &'a str,
+}
+
+/// The JSON shape for exactly one input that failed entirely, used both by
+/// stdin (always exactly one input) and by a single file/directory
+/// argument. Unifies what used to be two different failure shapes for the
+/// same "one input, it failed" case: stdin emitted a bare object with a
+/// zeroed count (indistinguishable from an empty file), while a single
+/// failing file/directory argument fell back to the `{"files": [...],
+/// "total": {...}}` multi-input envelope with an empty `files` array (#46,
+/// #108). A consumer that always passes one argument can now rely on a
+/// single, consistent failure shape regardless of input kind.
+pub fn format_json_error(name: &str, error: &str) -> String {
+    serde_json::to_string(&JsonError { file: name, error })
+        .expect("JsonError serialization cannot fail")
+}
+
 pub fn format_json_multiple(results: &[JsonFileResult], total: &Count) -> String {
     let files: Vec<JsonEntry> = results.iter().map(json_entry).collect();
     let total_file_count: usize = results
