@@ -128,25 +128,24 @@ impl CountAccumulator {
 impl Add for Count {
     type Output = Self;
 
-    fn add(self, other: Self) -> Self {
-        Self {
-            lines: self.lines.saturating_add(other.lines),
-            words: self.words.saturating_add(other.words),
-            bytes: self.bytes.saturating_add(other.bytes),
-            max_line_length: self.max_line_length.max(other.max_line_length),
-        }
+    fn add(mut self, other: Self) -> Self {
+        self += other;
+        self
     }
 }
 
 impl AddAssign for Count {
     fn add_assign(&mut self, other: Self) {
-        *self = *self + other;
+        self.lines = self.lines.saturating_add(other.lines);
+        self.words = self.words.saturating_add(other.words);
+        self.bytes = self.bytes.saturating_add(other.bytes);
+        self.max_line_length = self.max_line_length.max(other.max_line_length);
     }
 }
 
 impl Sum for Count {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        iter.fold(Self::default(), |acc, c| acc + c)
+        iter.fold(Self::default(), Add::add)
     }
 }
 
