@@ -1,6 +1,6 @@
 use clap::Parser;
 use std::io;
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Write};
 use std::path::Path;
 use std::process;
 
@@ -43,31 +43,42 @@ fn process_path(path: &Path, config: &FilterConfig) -> io::Result<ProcessResult>
     }
 }
 
-/// Prints a top-level "file/directory could not be processed" warning.
-fn warn_file_error(file: &Path, e: &io::Error, no_color: bool) {
+/// Writes a top-level "file/directory could not be processed" warning.
+fn warn_file_error(
+    err: &mut impl Write,
+    file: &Path,
+    e: &io::Error,
+    no_color: bool,
+) -> io::Result<()> {
     let is_tty = io::stderr().is_terminal();
-    eprintln!(
+    writeln!(
+        err,
         "{}{}: {e}",
         icon(no_color, WARNING_ICON),
         sanitize_for_display(&file.to_string_lossy(), is_tty)
-    );
+    )
 }
 
-/// Prints one warning line per skipped entry, matching warn_file_error's
+/// Writes one warning line per skipped entry, matching warn_file_error's
 /// style. Returns whether anything was skipped, so callers can fold it
 /// into the process's exit code.
-fn report_skipped(skipped: &[SkippedEntry], no_color: bool) -> bool {
+fn report_skipped(
+    err: &mut impl Write,
+    skipped: &[SkippedEntry],
+    no_color: bool,
+) -> io::Result<bool> {
     let is_tty = io::stderr().is_terminal();
     let warning = icon(no_color, WARNING_ICON);
     for entry in skipped {
         let path_str = entry.path.display().to_string();
-        eprintln!(
+        writeln!(
+            err,
             "{warning}{}: {}",
             sanitize_for_display(&path_str, is_tty),
             entry.error
-        );
+        )?;
     }
-    !skipped.is_empty()
+    Ok(!skipped.is_empty())
 }
 
 fn create_filter_config(args: &Args) -> io::Result<FilterConfig> {
@@ -150,11 +161,22 @@ fn main() {
         Ok(config) => config,
         Err(e) => {
             let is_tty = io::stderr().is_terminal();
-            eprintln!("{}", filter_config_error_line(&e, args.no_color, is_tty));
+            // Best-effort: the process is exiting on this path regardless,
+            // so a write failure here (including a broken pipe) has no
+            // further action to take.
+            let _ = writeln!(
+                io::stderr(),
+                "{}",
+                filter_config_error_line(&e, args.no_color, is_tty)
+            );
             if args.json {
                 // Keep stdout valid JSON even on failure, matching
                 // run_json_mode's all-inputs-failed behavior.
-                println!("{}", format_json_multiple(&[], &Count::default()));
+                let _ = writeln!(
+                    io::stdout(),
+                    "{}",
+                    format_json_multiple(&[], &Count::default())
+                );
             }
             process::exit(1);
         }
@@ -164,20 +186,44 @@ fn main() {
     let reads_stdin =
         args.files.is_empty() || (args.files.len() == 1 && args.files[0].as_os_str() == "-");
 
-    if reads_stdin {
-        run_stdin_mode(&args);
+    let result = if reads_stdin {
+        run_stdin_mode(&args)
     } else if args.json {
-        run_json_mode(&args, &config);
+        run_json_mode(&args, &config)
     } else {
-        run_normal_mode(&args, &config);
+        run_normal_mode(&args, &config)
+    };
+
+    match result {
+        Ok(has_error) => {
+            if has_error {
+                process::exit(1);
+            }
+        }
+        // A downstream reader (e.g. `| head`) closing early is not a
+        // program failure; exit the way a SIGPIPE-killed process would
+        // (matching GNU/BSD wc under `set -o pipefail`), with no further
+        // output to the dead pipe.
+        Err(e) if e.kind() == io::ErrorKind::BrokenPipe => process::exit(141),
+        Err(e) => {
+            // Best-effort, matching the other top-level error paths: if
+            // stderr is itself unwritable here there is no further action
+            // to take, and panicking would defeat the point of this match.
+            let _ = writeln!(io::stderr(), "ewc: {e}");
+            process::exit(1);
+        }
     }
 }
 
-fn run_stdin_mode(args: &Args) {
+fn run_stdin_mode(args: &Args) -> io::Result<bool> {
+    let is_terminal = io::stdout().is_terminal();
+    let mut out = io::stdout().lock();
+    let mut err = io::stderr().lock();
+
     let count = match count_from_reader(io::stdin().lock()) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("{}<stdin>: {e}", icon(args.no_color, WARNING_ICON));
+            writeln!(err, "{}<stdin>: {e}", icon(args.no_color, WARNING_ICON))?;
             if args.json {
                 // Same bare-object shape as the success path below (a zeroed
                 // Count on failure), not the {files, total} envelope: stdin
@@ -189,9 +235,9 @@ fn run_stdin_mode(args: &Args) {
                     kind: OutputKind::File,
                     skipped_count: 0,
                 };
-                println!("{}", format_json_single(&result));
+                writeln!(out, "{}", format_json_single(&result))?;
             }
-            process::exit(1);
+            return Ok(true);
         }
     };
 
@@ -202,33 +248,26 @@ fn run_stdin_mode(args: &Args) {
             kind: OutputKind::File,
             skipped_count: 0,
         };
-        println!("{}", format_json_single(&result));
+        writeln!(out, "{}", format_json_single(&result))?;
     } else if args.compact {
-        println!(
+        writeln!(
+            out,
             "{}",
-            format_compact_output(
-                "<stdin>",
-                &count,
-                OutputKind::File,
-                args,
-                io::stdout().is_terminal()
-            )
-        );
+            format_compact_output("<stdin>", &count, OutputKind::File, args, is_terminal)
+        )?;
     } else {
-        println!(
+        writeln!(
+            out,
             "{}",
-            format_output(
-                "<stdin>",
-                &count,
-                OutputKind::File,
-                args,
-                io::stdout().is_terminal()
-            )
-        );
+            format_output("<stdin>", &count, OutputKind::File, args, is_terminal)
+        )?;
     }
+    Ok(false)
 }
 
-fn run_json_mode(args: &Args, config: &FilterConfig) {
+fn run_json_mode(args: &Args, config: &FilterConfig) -> io::Result<bool> {
+    let mut out = io::stdout().lock();
+    let mut err = io::stderr().lock();
     let mut results: Vec<JsonFileResult> = Vec::new();
     let mut total_count = Count::default();
     let mut has_error = false;
@@ -238,13 +277,13 @@ fn run_json_mode(args: &Args, config: &FilterConfig) {
         let result = match process_path(path, config) {
             Ok(result) => result,
             Err(e) => {
-                warn_file_error(file, &e, args.no_color);
+                warn_file_error(&mut err, file, &e, args.no_color)?;
                 has_error = true;
                 continue;
             }
         };
 
-        if report_skipped(&result.skipped, args.no_color) {
+        if report_skipped(&mut err, &result.skipped, args.no_color)? {
             has_error = true;
         }
 
@@ -269,16 +308,16 @@ fn run_json_mode(args: &Args, config: &FilterConfig) {
     // total} envelope — an unpredictable schema for a pipe consumer that
     // can't know success counts ahead of time (#27).
     match (args.files.len(), results.as_slice()) {
-        (1, [single]) => println!("{}", format_json_single(single)),
-        _ => println!("{}", format_json_multiple(&results, &total_count)),
+        (1, [single]) => writeln!(out, "{}", format_json_single(single))?,
+        _ => writeln!(out, "{}", format_json_multiple(&results, &total_count))?,
     }
 
-    if has_error {
-        process::exit(1);
-    }
+    Ok(has_error)
 }
 
-fn run_normal_mode(args: &Args, config: &FilterConfig) {
+fn run_normal_mode(args: &Args, config: &FilterConfig) -> io::Result<bool> {
+    let mut out = io::stdout().lock();
+    let mut err = io::stderr().lock();
     let mut has_error = false;
     let mut total_count = Count::default();
     let mut total_file_count = 0;
@@ -293,12 +332,13 @@ fn run_normal_mode(args: &Args, config: &FilterConfig) {
         if path.is_dir() && args.verbose {
             match count_directory_detailed(path, config) {
                 Ok((entries, dir_total, skipped)) => {
-                    println!(
+                    writeln!(
+                        out,
                         "{}",
                         format_verbose_output(&entries, &dir_total, args, is_terminal)
-                    );
+                    )?;
 
-                    if report_skipped(&skipped, args.no_color) {
+                    if report_skipped(&mut err, &skipped, args.no_color)? {
                         has_error = true;
                     }
 
@@ -307,11 +347,11 @@ fn run_normal_mode(args: &Args, config: &FilterConfig) {
                     successful_args += 1;
 
                     if !is_last {
-                        println!();
+                        writeln!(out)?;
                     }
                 }
                 Err(e) => {
-                    warn_file_error(file, &e, args.no_color);
+                    warn_file_error(&mut err, file, &e, args.no_color)?;
                     has_error = true;
                 }
             }
@@ -329,9 +369,9 @@ fn run_normal_mode(args: &Args, config: &FilterConfig) {
                     } else {
                         format_output(&name, &result.count, kind, args, is_terminal)
                     };
-                    println!("{output}");
+                    writeln!(out, "{output}")?;
 
-                    if report_skipped(&result.skipped, args.no_color) {
+                    if report_skipped(&mut err, &result.skipped, args.no_color)? {
                         has_error = true;
                     }
 
@@ -340,11 +380,11 @@ fn run_normal_mode(args: &Args, config: &FilterConfig) {
                     successful_args += 1;
 
                     if !args.compact && !is_last {
-                        println!();
+                        writeln!(out)?;
                     }
                 }
                 Err(e) => {
-                    warn_file_error(file, &e, args.no_color);
+                    warn_file_error(&mut err, file, &e, args.no_color)?;
                     has_error = true;
                 }
             }
@@ -353,20 +393,18 @@ fn run_normal_mode(args: &Args, config: &FilterConfig) {
 
     if successful_args > 1 {
         if !args.compact {
-            println!();
-            println!("{}", format_separator());
+            writeln!(out)?;
+            writeln!(out, "{}", format_separator())?;
         }
         let total = if args.compact {
             format_compact_total(total_file_count, &total_count, args)
         } else {
             format_total_output(total_file_count, &total_count, args)
         };
-        println!("{total}");
+        writeln!(out, "{total}")?;
     }
 
-    if has_error {
-        process::exit(1);
-    }
+    Ok(has_error)
 }
 
 #[cfg(test)]

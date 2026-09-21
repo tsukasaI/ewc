@@ -1,5 +1,5 @@
-use std::io::Write;
-use std::process::Command;
+use std::io::{Read, Write};
+use std::process::{Command, Stdio};
 
 fn create_test_file(content: &str) -> tempfile::NamedTempFile {
     let mut file = tempfile::NamedTempFile::new().unwrap();
@@ -796,4 +796,36 @@ fn directory_scan_reports_unreadable_file_and_exits_nonzero() {
     assert!(result.stderr.contains("unreadable.txt"));
     // The readable file must still be counted, not silently dropped.
     assert!(result.stdout.contains("(1 file)"));
+}
+
+#[test]
+fn broken_pipe_on_stdout_exits_cleanly_instead_of_panicking() {
+    // Regression test for #33/#43: this used to panic ("failed printing to
+    // stdout: Broken pipe") and exit 101 instead of exiting cleanly. The
+    // read end is dropped before the child can have written anything, so a
+    // pipe with no reader fails the child's very first write with EPIPE
+    // regardless of output size -- deterministic, not dependent on the
+    // output happening to exceed the OS pipe buffer.
+    let file = create_test_file("hello world\n");
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ewc"))
+        .args(["-v", file.path().to_str().unwrap()])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn ewc");
+
+    drop(child.stdout.take());
+
+    let mut stderr_buf = String::new();
+    if let Some(mut stderr) = child.stderr.take() {
+        let _ = stderr.read_to_string(&mut stderr_buf);
+    }
+
+    let status = child.wait().expect("failed to wait on ewc");
+
+    #[cfg(unix)]
+    assert_eq!(status.code(), Some(141));
+    assert_ne!(status.code(), Some(101));
+    assert!(!stderr_buf.contains("panicked"));
 }
