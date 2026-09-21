@@ -305,15 +305,12 @@ struct JsonError<'a> {
     error: &'a str,
 }
 
-/// The JSON shape for exactly one input that failed entirely, used both by
-/// stdin (always exactly one input) and by a single file/directory
-/// argument. Unifies what used to be two different failure shapes for the
-/// same "one input, it failed" case: stdin emitted a bare object with a
-/// zeroed count (indistinguishable from an empty file), while a single
-/// failing file/directory argument fell back to the `{"files": [...],
-/// "total": {...}}` multi-input envelope with an empty `files` array (#46,
-/// #108). A consumer that always passes one argument can now rely on a
-/// single, consistent failure shape regardless of input kind.
+/// The JSON shape for a single input that could not be opened/read at all,
+/// used both by stdin (always exactly one input) and by a single
+/// file/directory argument (#46, #108). Does not cover a directory that
+/// opened but had some of its own entries skipped (permission denied,
+/// vanished mid-walk, etc.); that partial case still succeeds and reports
+/// via `skipped_count` on the normal directory shape.
 pub fn format_json_error(name: &str, error: &str) -> String {
     serde_json::to_string(&JsonError { file: name, error })
         .expect("JsonError serialization cannot fail")

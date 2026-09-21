@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking**: `--json` with a single input (stdin, or one file/directory argument, or an invalid `--exclude`/`--include` pattern) that fails now emits `{"file": "<name>", "error": "<message>"}` instead of a zeroed-count object (stdin's prior failure shape) or the `{"files": [], "total": {...}}` envelope (a single file/directory argument's prior failure shape). Consumers should detect failure by the presence of the `error` key, not by `"files"` or `lines == 0`. Does not cover a directory that opens but has some of its own entries skipped mid-walk; that case is unchanged and still reports via `skipped_count`
+
 ### Fixed
 
 - `-v` now shows every requested metric on each line (e.g. `-v -w -c` prints `3 words, 16 bytes`), superseding 0.5.0's first-requested-metric-only behavior; the flagless default (lines only) is unchanged

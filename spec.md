@@ -164,21 +164,28 @@ $ cat file.txt | ewc -
   `--json`: JSON mode's per-failure warnings go to stderr, not stdout
   JSON, and `--no-color` suppresses the icon on those
 - Exactly one input -- stdin, or a single file/directory argument -- that
-  fails entirely emits the same single-object error shape,
-  `{"file": "<name>", "error": "<message>"}`, rather than either a fake
-  zeroed-count success object or the `{"files": [...], "total": {...}}`
-  envelope with an empty `files` array (#46, #108). Reading from stdin
-  always produces a single object either way (this error shape on
-  failure, the normal `{"file": "<stdin>", ...}` shape on success), since
-  stdin is always exactly one input.
+  could not be opened/read at all (nonexistent path, permission denied on
+  the argument itself, an unreadable stdin) emits the same single-object
+  error shape, `{"file": "<name>", "error": "<message>"}`, rather than
+  either a fake zeroed-count success object or the `{"files": [...],
+  "total": {...}}` envelope with an empty `files` array (#46, #108). This
+  also applies when an invalid `--exclude`/`--include` pattern rejects the
+  run before anything is processed. Reading from stdin always produces a
+  single object either way (this error shape on failure, the normal
+  `{"file": "<stdin>", ...}` shape on success), since stdin is always
+  exactly one input. **Not covered**: a directory argument that opens
+  successfully but has some of its own entries skipped mid-walk -- that
+  case still succeeds and reports via `skipped_count` below, not this
+  error shape.
 - A directory (or the aggregate `total` in the envelope shape) includes
   a `skipped_count` field when one or more of its *own* entries couldn't
   be counted (permission denied, vanished mid-walk, etc.), so a consumer
-  parsing only stdout JSON can tell a directory's total is partial. This
-  does not cover a top-level file/directory argument that failed
-  entirely (that's absent from `files` and only visible via the exit
-  code and stderr). The field is omitted entirely when nothing was
-  skipped, so the common case's shape is unchanged
+  parsing only stdout JSON can tell a directory's total is partial. A
+  top-level file/directory argument that could not be opened at all is
+  not covered by this field (it uses the error shape above when it's the
+  only argument, or is simply absent from `files` in the multi-input
+  envelope). The field is omitted entirely when nothing was skipped, so
+  the common case's shape is unchanged
 
 ### Counting Semantics
 

@@ -170,13 +170,23 @@ fn main() {
                 filter_config_error_line(&e, args.no_color, is_tty)
             );
             if args.json {
-                // Keep stdout valid JSON even on failure, matching
-                // run_json_mode's all-inputs-failed behavior.
-                let _ = writeln!(
-                    io::stdout(),
-                    "{}",
-                    format_json_multiple(&[], &Count::default())
-                );
+                // Keep stdout valid JSON even on failure. A single input
+                // (stdin, or one file/directory argument) uses the same
+                // error shape a single failing input uses everywhere else
+                // (#46, #108); more than one argument uses the multi-input
+                // envelope, matching run_json_mode's all-inputs-failed
+                // behavior.
+                let single_input_name = match args.files.as_slice() {
+                    [] => Some("<stdin>".to_string()),
+                    [only] if only.as_os_str() == "-" => Some("<stdin>".to_string()),
+                    [only] => Some(only.to_string_lossy().into_owned()),
+                    _ => None,
+                };
+                let json = match single_input_name {
+                    Some(name) => format_json_error(&name, &e.to_string()),
+                    None => format_json_multiple(&[], &Count::default()),
+                };
+                let _ = writeln!(io::stdout(), "{json}");
             }
             process::exit(1);
         }
