@@ -162,20 +162,24 @@ pub fn format_compact_total(file_count: usize, count: &Count, args: &Args) -> St
     )
 }
 
-/// First-enabled-metric lookup for verbose mode's one-metric-per-line
-/// display. Lines must stay before words/bytes (so the flagless default
-/// shows lines) and max must stay last (so `-l -L` shows lines, not max).
+/// Verbose mode's one-line-per-file metric display. Unlike the non-verbose
+/// formatters, the flagless default shows lines only, not every metric --
+/// checked directly against the raw flags (selected_metrics' show_*()
+/// helpers OR in the flagless-default case, which would make every metric
+/// look requested here). With one or more metric flags given, every
+/// requested metric is shown, via the same selected_metrics list the
+/// non-verbose formatters use.
 fn format_single_count(count: &Count, args: &Args) -> String {
-    let (value, unit) = if args.show_lines() {
-        (count.lines, "lines")
-    } else if args.show_words() {
-        (count.words, "words")
-    } else if args.show_bytes() {
-        (count.bytes, "bytes")
-    } else {
-        (count.max_line_length, "max")
-    };
-    format!("{} {unit}", format_number(value))
+    let no_flags = !args.max_line_length && !args.lines && !args.words && !args.bytes;
+    if no_flags {
+        return format!("{} lines", format_number(count.lines));
+    }
+
+    selected_metrics(count, args)
+        .into_iter()
+        .map(|(_, unit, value)| format!("{} {unit}", format_number(value)))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn format_verbose_entry(entry: &FileEntry, args: &Args, is_terminal: bool) -> String {
@@ -450,7 +454,9 @@ mod tests {
         assert!(output.contains("4 max"));
         assert!(!output.contains("1 lines"));
 
-        // -l -L: lines wins even though max is also requested.
+        // -l -L: both requested metrics must show (#44 -- a prior version
+        // of this function silently dropped every flag but the first
+        // match, so -l -L showed only lines and -w -c showed only words).
         let args = Args {
             lines: true,
             max_line_length: true,
@@ -458,7 +464,7 @@ mod tests {
         };
         let output = format_verbose_output(&entries, &count, &args, false);
         assert!(output.contains("1 lines"));
-        assert!(!output.contains("4 max"));
+        assert!(output.contains("4 max"));
     }
 
     #[test]
