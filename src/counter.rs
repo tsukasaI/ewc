@@ -293,11 +293,14 @@ pub fn count_from_reader<R: Read>(mut reader: R) -> io::Result<Count> {
     Ok(acc.finish())
 }
 
+// Compares the raw encoded bytes rather than going through to_str(), which
+// returns None (treated as "not hidden") for any name that isn't valid
+// UTF-8 -- a non-UTF-8 dotfile would otherwise be counted even without -a.
+// OsStr::as_encoded_bytes' encoding is unspecified but guarantees ASCII
+// bytes (like '.') round-trip unchanged, so comparing against b'.' is valid
+// cross-platform, unlike a Unix-only OsStrExt::as_bytes cast.
 fn is_hidden(entry: &walkdir::DirEntry) -> bool {
-    entry
-        .file_name()
-        .to_str()
-        .is_some_and(|s| s.starts_with('.'))
+    entry.file_name().as_encoded_bytes().first() == Some(&b'.')
 }
 
 // Tests both a lossy-UTF-8 string candidate and a raw-path candidate,
@@ -1470,5 +1473,28 @@ mod tests {
         assert_eq!(count.lines, 0);
         assert_eq!(count.words, 0);
         assert_eq!(count.bytes, 0);
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn count_directory_excludes_non_utf8_hidden_file() {
+        // Regression test for #47: is_hidden used to go through
+        // OsStr::to_str(), which returns None (treated as "not hidden") for
+        // any name that isn't valid UTF-8. Only reproducible on Linux --
+        // macOS's filesystem (APFS/HFS+) rejects non-UTF-8 filenames
+        // outright.
+        use std::os::unix::ffi::OsStringExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("visible.txt"), "visible\n").unwrap();
+
+        let hidden_name = std::ffi::OsString::from_vec(b".hidden\xFF.txt".to_vec());
+        std::fs::write(dir.path().join(&hidden_name), "hidden\n").unwrap();
+
+        let (_, file_count, _) = count_directory(dir.path(), &default_config()).unwrap();
+        assert_eq!(file_count, 1); // Only visible file
+
+        let (_, file_count, _) = count_directory(dir.path(), &config_with_hidden()).unwrap();
+        assert_eq!(file_count, 2); // Both, with -a
     }
 }
