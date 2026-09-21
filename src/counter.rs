@@ -180,6 +180,7 @@ impl FilterConfig {
     fn build_globset(patterns: &[String]) -> io::Result<GlobSet> {
         let mut builder = GlobSetBuilder::new();
         for pattern in patterns {
+            Self::check_pattern_bounds(pattern)?;
             let glob = Glob::new(pattern).map_err(|e| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -194,6 +195,62 @@ impl FilterConfig {
                 format!("Failed to build glob set: {}", e),
             )
         })
+    }
+
+    /// Rejects patterns that would otherwise reach globset's `{...}`
+    /// alternation compiler, which recurses once per brace-nesting level on
+    /// the main thread's stack (both in building the regex and in dropping
+    /// the resulting token tree) and can abort the process with a stack
+    /// overflow -- a crash `Glob::new`'s `Result` can never catch or report.
+    /// Measured against globset 0.4.20: regex-syntax's default nest_limit of
+    /// 250 already rejects any brace nesting deeper than 124 as a graceful
+    /// `Glob::new` error, so a cap of 64 loses no working pattern while
+    /// staying well clear of the depth where recursion becomes dangerous.
+    fn check_pattern_bounds(pattern: &str) -> io::Result<()> {
+        const MAX_PATTERN_LEN: usize = 4096;
+        const MAX_BRACE_DEPTH: usize = 64;
+
+        if pattern.len() > MAX_PATTERN_LEN {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "Glob pattern too long ({} bytes, max {}): '{}...'",
+                    pattern.len(),
+                    MAX_PATTERN_LEN,
+                    &pattern[..64.min(pattern.len())]
+                ),
+            ));
+        }
+
+        let mut depth = 0usize;
+        let mut max_depth = 0usize;
+        let mut escaped = false;
+        for b in pattern.bytes() {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            match b {
+                b'\\' => escaped = true,
+                b'{' => {
+                    depth += 1;
+                    max_depth = max_depth.max(depth);
+                }
+                b'}' => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+        }
+
+        if max_depth > MAX_BRACE_DEPTH {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "Glob pattern brace nesting too deep ({max_depth} levels, max {MAX_BRACE_DEPTH}): '{pattern}'"
+                ),
+            ));
+        }
+
+        Ok(())
     }
 }
 
@@ -637,6 +694,37 @@ mod tests {
 
     fn default_config() -> FilterConfig {
         FilterConfig::default()
+    }
+
+    #[test]
+    fn build_globset_rejects_deeply_nested_braces() {
+        // 100-level-deep {a,{a,{a,...}}} alternation. Must return Err, not
+        // abort the test process with a stack overflow (#34).
+        let mut pattern = String::new();
+        for _ in 0..100 {
+            pattern.push('{');
+        }
+        pattern.push('a');
+        for _ in 0..100 {
+            pattern.push_str(",b}");
+        }
+        let result = FilterConfig::new(false, &[pattern], &[]);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn build_globset_rejects_overlong_pattern() {
+        let pattern = "a".repeat(5000);
+        let result = FilterConfig::new(false, &[pattern], &[]);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn build_globset_accepts_normal_brace_patterns() {
+        assert!(FilterConfig::new(false, &["{a,b}".to_string()], &[]).is_ok());
+        assert!(FilterConfig::new(false, &["{a,{b,c}}".to_string()], &[]).is_ok());
     }
 
     fn config_with_hidden() -> FilterConfig {
