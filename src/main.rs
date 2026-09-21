@@ -323,11 +323,8 @@ fn run_normal_mode(args: &Args, config: &FilterConfig) -> io::Result<bool> {
     let mut total_file_count = 0;
     let mut successful_args = 0;
     let is_terminal = io::stdout().is_terminal();
-    // Tracks whether a blank separator line is owed before the next block
-    // (the next argument's output, or the total block), rather than
-    // deriving it from is_last: a failing argument prints nothing, so
-    // deriving eagerly from "is there a following argument" double-counts
-    // the blank when the trailing argument(s) fail (#49).
+    // Blank separator owed before the next block. A failing argument
+    // prints nothing, so this can't be derived from loop position (#49).
     let mut needs_leading_blank = false;
 
     for file in &args.files {
@@ -352,7 +349,7 @@ fn run_normal_mode(args: &Args, config: &FilterConfig) -> io::Result<bool> {
                     total_count += dir_total;
                     total_file_count += entries.len();
                     successful_args += 1;
-                    needs_leading_blank = true;
+                    needs_leading_blank = !args.compact;
                 }
                 Err(e) => {
                     warn_file_error(&mut err, file, &e, args.no_color)?;
@@ -373,7 +370,7 @@ fn run_normal_mode(args: &Args, config: &FilterConfig) -> io::Result<bool> {
                     } else {
                         format_output(&name, &result.count, kind, args, is_terminal)
                     };
-                    if needs_leading_blank && !args.compact {
+                    if needs_leading_blank {
                         writeln!(out)?;
                     }
                     writeln!(out, "{output}")?;

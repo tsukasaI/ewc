@@ -98,6 +98,9 @@ fn single_error_among_multiple_no_total_if_one_success() {
     assert!(!result.success);
     assert!(result.stderr.contains("nonexistent.txt"));
     assert!(!result.stdout.contains("Total")); // Only 1 successful file, no total
+                                               // Regression test for #49: with no total block to follow it, the lone
+                                               // success's output must not leave a stray trailing blank line.
+    assert!(!result.stdout.ends_with("\n\n"));
 }
 
 #[test]
