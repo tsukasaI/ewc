@@ -231,6 +231,16 @@ fn is_hidden(entry: &walkdir::DirEntry) -> bool {
         .is_some_and(|s| s.starts_with('.'))
 }
 
+// Tests both a lossy-UTF-8 string candidate and a raw-path candidate,
+// deliberately, not redundantly: globset compiles patterns in byte mode
+// (`(?-u)`), so `?` and character classes match single *bytes*. For a
+// non-UTF-8 path, `to_string_lossy()` replaces each invalid byte with a
+// 3-byte U+FFFD before matching, while `is_match(relative_path)` sees the
+// raw `OsStr` bytes unchanged -- the two candidates can therefore match
+// different sets of patterns on the same path. Both arms are kept so a
+// pattern like `foo?` still matches a non-UTF-8 `foo<byte>` path via the
+// raw-byte candidate even though the lossy string candidate sees a
+// different byte length. See the non-UTF-8 regression test below.
 fn matches_glob(glob_set: &GlobSet, relative_path: &Path) -> bool {
     let path_str = relative_path.to_string_lossy();
     glob_set.is_match(&*path_str) || glob_set.is_match(relative_path)
@@ -372,6 +382,28 @@ pub fn count_directory_detailed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(unix)]
+    fn matches_glob_raw_byte_candidate_matches_non_utf8_path_lossy_string_would_miss() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+
+        // "foo" + one invalid UTF-8 byte. globset compiles patterns in byte
+        // mode, so "foo?" matches this path's raw bytes exactly (3 literal
+        // bytes + 1 wildcard byte). But to_string_lossy() replaces the
+        // invalid byte with U+FFFD, which is 3 bytes in UTF-8, so the lossy
+        // string candidate is "foo" + 3 bytes = 6 bytes, which "foo?" does
+        // NOT match. Only the raw-path arm of matches_glob catches this.
+        let raw_path = OsStr::from_bytes(b"foo\xFF");
+        let path = Path::new(raw_path);
+
+        let mut builder = GlobSetBuilder::new();
+        builder.add(Glob::new("foo?").unwrap());
+        let glob_set = builder.build().unwrap();
+
+        assert!(matches_glob(&glob_set, path));
+    }
 
     // Test-only fixture: production code only ever needs the full
     // Vec<FileEntry> from count_directory_detailed (main.rs derives
