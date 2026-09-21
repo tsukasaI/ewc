@@ -984,11 +984,10 @@ fn broken_pipe_on_stdout_exits_cleanly_instead_of_panicking() {
     // Regression test for #33/#43: this used to panic ("failed printing to
     // stdout: Broken pipe") and exit 101 instead of exiting cleanly. The
     // read end of stdout's pipe is closed via std::io::pipe() before the
-    // child is even spawned, so the child's first write is guaranteed to
-    // fail with EPIPE regardless of scheduling -- unlike dropping a
-    // Stdio::piped() handle *after* spawn(), which races the child's
-    // startup and was observed to flake on a loaded CI runner (the read
-    // end can still be open when the child's first write lands).
+    // child is even spawned, so no reader exists at any point in the
+    // child's lifetime and its first write fails with EPIPE regardless of
+    // scheduling. Dropping a Stdio::piped() handle after spawn() instead
+    // would race the child's startup.
     let file = create_test_file("hello world\n");
 
     let (reader, writer) = std::io::pipe().expect("failed to create pipe");
