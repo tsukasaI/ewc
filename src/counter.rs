@@ -204,34 +204,47 @@ impl FilterConfig {
     /// overflow -- a crash `Glob::new`'s `Result` can never catch or report.
     /// Measured against globset 0.4.20: regex-syntax's default nest_limit of
     /// 250 already rejects any brace nesting deeper than 124 as a graceful
-    /// `Glob::new` error, so a cap of 64 loses no working pattern while
-    /// staying well clear of the depth where recursion becomes dangerous.
+    /// `Glob::new` error, so a cap of 64 loses no pattern from the
+    /// crash-prone range while staying well clear of the depth where
+    /// recursion becomes dangerous (depths 65-124 build fine today but are
+    /// far outside any realistic exclude/include pattern).
     fn check_pattern_bounds(pattern: &str) -> io::Result<()> {
         const MAX_PATTERN_LEN: usize = 4096;
         const MAX_BRACE_DEPTH: usize = 64;
 
         if pattern.len() > MAX_PATTERN_LEN {
+            // Truncate at the nearest preceding UTF-8 char boundary: a raw
+            // byte-index slice would panic if byte 64 lands inside a
+            // multi-byte character (e.g. a pattern of repeated non-ASCII
+            // characters).
+            let cut = (0..=64.min(pattern.len()))
+                .rev()
+                .find(|&i| pattern.is_char_boundary(i))
+                .unwrap_or(0);
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!(
                     "Glob pattern too long ({} bytes, max {}): '{}...'",
                     pattern.len(),
                     MAX_PATTERN_LEN,
-                    &pattern[..64.min(pattern.len())]
+                    &pattern[..cut]
                 ),
             ));
         }
 
+        // Every '{' counts toward depth, with no backslash-escape exemption:
+        // globset itself only treats '\\' as an escape character on
+        // platforms where '\\' isn't the path separator (its
+        // `backslash_escape` is `!is_separator('\\')`), so on Windows an
+        // escape-aware scan here would under-count a "\{"-prefixed pattern
+        // relative to what globset actually parses as alternation. Counting
+        // unconditionally can only over-count, never miss real nesting, and
+        // a pattern with many literal escaped braces is not a realistic
+        // input this cap needs to accommodate.
         let mut depth = 0usize;
         let mut max_depth = 0usize;
-        let mut escaped = false;
         for b in pattern.bytes() {
-            if escaped {
-                escaped = false;
-                continue;
-            }
             match b {
-                b'\\' => escaped = true,
                 b'{' => {
                     depth += 1;
                     max_depth = max_depth.max(depth);
@@ -696,21 +709,34 @@ mod tests {
         FilterConfig::default()
     }
 
-    #[test]
-    fn build_globset_rejects_deeply_nested_braces() {
-        // 100-level-deep {a,{a,{a,...}}} alternation. Must return Err, not
-        // abort the test process with a stack overflow (#34).
+    fn nested_brace_pattern(depth: usize) -> String {
         let mut pattern = String::new();
-        for _ in 0..100 {
+        for _ in 0..depth {
             pattern.push('{');
         }
         pattern.push('a');
-        for _ in 0..100 {
+        for _ in 0..depth {
             pattern.push_str(",b}");
         }
-        let result = FilterConfig::new(false, &[pattern], &[]);
+        pattern
+    }
+
+    #[test]
+    fn build_globset_rejects_pattern_at_the_actual_crash_depth() {
+        // The depth (15000) that reproduces the real stack-overflow abort
+        // from #34's report; this is the input the cap exists to catch, not
+        // just an arbitrarily-deep one. Must return Err, not abort the test
+        // process.
+        let result = FilterConfig::new(false, &[nested_brace_pattern(15000)], &[]);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn build_globset_brace_depth_boundary() {
+        // Depth exactly at the cap must still build; one level over must not.
+        assert!(FilterConfig::new(false, &[nested_brace_pattern(64)], &[]).is_ok());
+        assert!(FilterConfig::new(false, &[nested_brace_pattern(65)], &[]).is_err());
     }
 
     #[test]
@@ -719,6 +745,22 @@ mod tests {
         let result = FilterConfig::new(false, &[pattern], &[]);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn build_globset_rejects_overlong_multibyte_pattern_without_panicking() {
+        // The truncated-pattern error message must cut at a UTF-8 char
+        // boundary rather than panicking on a raw byte-index slice.
+        let pattern = "あ".repeat(2000);
+        let result = FilterConfig::new(false, &[pattern], &[]);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn build_globset_length_boundary() {
+        assert!(FilterConfig::new(false, &["a".repeat(4096)], &[]).is_ok());
+        assert!(FilterConfig::new(false, &["a".repeat(4097)], &[]).is_err());
     }
 
     #[test]
