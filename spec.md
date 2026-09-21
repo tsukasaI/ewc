@@ -241,8 +241,7 @@ ewc/
 │   ├── counter.rs     # Count logic
 │   └── output.rs      # Output formatting
 └── tests/
-    ├── integration.rs # Integration tests
-    └── benchmark.rs   # Manual performance comparison against `wc`
+    └── integration.rs # Integration tests
 ```
 
 ## Advanced Features
