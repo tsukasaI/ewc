@@ -983,20 +983,22 @@ fn directory_scan_reports_unreadable_file_and_exits_nonzero() {
 fn broken_pipe_on_stdout_exits_cleanly_instead_of_panicking() {
     // Regression test for #33/#43: this used to panic ("failed printing to
     // stdout: Broken pipe") and exit 101 instead of exiting cleanly. The
-    // read end is dropped before the child can have written anything, so a
-    // pipe with no reader fails the child's very first write with EPIPE
-    // regardless of output size -- deterministic, not dependent on the
-    // output happening to exceed the OS pipe buffer.
+    // read end of stdout's pipe is closed via std::io::pipe() before the
+    // child is even spawned, so no reader exists at any point in the
+    // child's lifetime and its first write fails with EPIPE regardless of
+    // scheduling. Dropping a Stdio::piped() handle after spawn() instead
+    // would race the child's startup.
     let file = create_test_file("hello world\n");
+
+    let (reader, writer) = std::io::pipe().expect("failed to create pipe");
+    drop(reader);
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_ewc"))
         .args(["-v", file.path().to_str().unwrap()])
-        .stdout(Stdio::piped())
+        .stdout(writer)
         .stderr(Stdio::piped())
         .spawn()
         .expect("failed to spawn ewc");
-
-    drop(child.stdout.take());
 
     let mut stderr_buf = String::new();
     if let Some(mut stderr) = child.stderr.take() {
