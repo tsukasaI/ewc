@@ -5,7 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.6.0] - 2026-09-21
+
+### Security
+
+- A closed downstream pipe (e.g. `ewc -v <bigdir> | head -1`) no longer panics with exit code 101; ewc now exits 141, matching `wc` under `set -o pipefail`
+- An unbounded `--exclude`/`--include` glob pattern (excessive length or `{...}` brace-nesting depth) no longer risks a stack overflow (SIGABRT); it's now rejected up front with a graceful error
 
 ### Changed
 
@@ -14,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - `-v` now shows every requested metric on each line (e.g. `-v -w -c` prints `3 words, 16 bytes`), superseding 0.5.0's first-requested-metric-only behavior; the flagless default (lines only) is unchanged
+- Dotfiles whose names are not valid UTF-8 are now excluded by default like any other dotfile, instead of being silently included without `-a`
+- A trailing failing argument no longer leaves an extra blank line before the total separator (or a stray trailing blank line when it was the only failure)
+- `--no-color`'s help text now says "Disable icons", matching its actual behavior (it never disabled colors, only emoji icons)
+
+### Dependencies
+
+- Updated `clap` to 4.6.7
 
 ## [0.5.0] - 2026-09-15
 
