@@ -98,6 +98,9 @@ fn single_error_among_multiple_no_total_if_one_success() {
     assert!(!result.success);
     assert!(result.stderr.contains("nonexistent.txt"));
     assert!(!result.stdout.contains("Total")); // Only 1 successful file, no total
+                                               // Regression test for #49: with no total block to follow it, the lone
+                                               // success's output must not leave a stray trailing blank line.
+    assert!(!result.stdout.ends_with("\n\n"));
 }
 
 #[test]
@@ -161,6 +164,26 @@ fn blank_lines_between_files() {
     assert!(result.success);
     // Should have blank line between file outputs
     assert!(result.stdout.contains("\n\n"));
+}
+
+#[test]
+fn no_extra_blank_line_when_trailing_argument_fails() {
+    // Regression test for #49: a blank separator used to be printed
+    // eagerly whenever an argument wasn't the last one, so a trailing
+    // failing argument left the preceding success's blank line stacked
+    // with the total block's own leading blank, producing two consecutive
+    // blank lines instead of one.
+    let file1 = create_test_file("hello\n");
+    let file2 = create_test_file("world\n");
+    let result = run_ewc(&[
+        file1.path().to_str().unwrap(),
+        file2.path().to_str().unwrap(),
+        "nonexistent.txt",
+    ]);
+
+    assert!(!result.success);
+    assert!(result.stdout.contains("Total (2 files)"));
+    assert!(!result.stdout.contains("\n\n\n"));
 }
 
 fn create_test_dir() -> tempfile::TempDir {
