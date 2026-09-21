@@ -163,6 +163,26 @@ fn blank_lines_between_files() {
     assert!(result.stdout.contains("\n\n"));
 }
 
+#[test]
+fn no_extra_blank_line_when_trailing_argument_fails() {
+    // Regression test for #49: a blank separator used to be printed
+    // eagerly whenever an argument wasn't the last one, so a trailing
+    // failing argument left the preceding success's blank line stacked
+    // with the total block's own leading blank, producing two consecutive
+    // blank lines instead of one.
+    let file1 = create_test_file("hello\n");
+    let file2 = create_test_file("world\n");
+    let result = run_ewc(&[
+        file1.path().to_str().unwrap(),
+        file2.path().to_str().unwrap(),
+        "nonexistent.txt",
+    ]);
+
+    assert!(!result.success);
+    assert!(result.stdout.contains("Total (2 files)"));
+    assert!(!result.stdout.contains("\n\n\n"));
+}
+
 fn create_test_dir() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("file1.txt"), "hello world\n").unwrap();

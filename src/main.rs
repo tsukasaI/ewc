@@ -322,16 +322,23 @@ fn run_normal_mode(args: &Args, config: &FilterConfig) -> io::Result<bool> {
     let mut total_count = Count::default();
     let mut total_file_count = 0;
     let mut successful_args = 0;
-    let file_count = args.files.len();
     let is_terminal = io::stdout().is_terminal();
+    // Tracks whether a blank separator line is owed before the next block
+    // (the next argument's output, or the total block), rather than
+    // deriving it from is_last: a failing argument prints nothing, so
+    // deriving eagerly from "is there a following argument" double-counts
+    // the blank when the trailing argument(s) fail (#49).
+    let mut needs_leading_blank = false;
 
-    for (index, file) in args.files.iter().enumerate() {
+    for file in &args.files {
         let path = file.as_path();
-        let is_last = index == file_count - 1;
 
         if path.is_dir() && args.verbose {
             match count_directory_detailed(path, config) {
                 Ok((entries, dir_total, skipped)) => {
+                    if needs_leading_blank {
+                        writeln!(out)?;
+                    }
                     writeln!(
                         out,
                         "{}",
@@ -345,10 +352,7 @@ fn run_normal_mode(args: &Args, config: &FilterConfig) -> io::Result<bool> {
                     total_count += dir_total;
                     total_file_count += entries.len();
                     successful_args += 1;
-
-                    if !is_last {
-                        writeln!(out)?;
-                    }
+                    needs_leading_blank = true;
                 }
                 Err(e) => {
                     warn_file_error(&mut err, file, &e, args.no_color)?;
@@ -369,6 +373,9 @@ fn run_normal_mode(args: &Args, config: &FilterConfig) -> io::Result<bool> {
                     } else {
                         format_output(&name, &result.count, kind, args, is_terminal)
                     };
+                    if needs_leading_blank && !args.compact {
+                        writeln!(out)?;
+                    }
                     writeln!(out, "{output}")?;
 
                     if report_skipped(&mut err, &result.skipped, args.no_color)? {
@@ -378,10 +385,7 @@ fn run_normal_mode(args: &Args, config: &FilterConfig) -> io::Result<bool> {
                     total_count += result.count;
                     total_file_count += result.file_count;
                     successful_args += 1;
-
-                    if !args.compact && !is_last {
-                        writeln!(out)?;
-                    }
+                    needs_leading_blank = !args.compact;
                 }
                 Err(e) => {
                     warn_file_error(&mut err, file, &e, args.no_color)?;
@@ -393,7 +397,9 @@ fn run_normal_mode(args: &Args, config: &FilterConfig) -> io::Result<bool> {
 
     if successful_args > 1 {
         if !args.compact {
-            writeln!(out)?;
+            if needs_leading_blank {
+                writeln!(out)?;
+            }
             writeln!(out, "{}", format_separator())?;
         }
         let total = if args.compact {
