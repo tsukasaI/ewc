@@ -163,15 +163,12 @@ pub fn format_compact_total(file_count: usize, count: &Count, args: &Args) -> St
 }
 
 /// Verbose mode's one-line-per-file metric display. Unlike the non-verbose
-/// formatters, the flagless default shows lines only, not every metric --
-/// checked directly against the raw flags (selected_metrics' show_*()
-/// helpers OR in the flagless-default case, which would make every metric
-/// look requested here). With one or more metric flags given, every
-/// requested metric is shown, via the same selected_metrics list the
-/// non-verbose formatters use.
+/// formatters, the flagless default shows lines only, not every metric, so
+/// `show_all()` is checked explicitly before consulting `selected_metrics`.
+/// With one or more metric flags given, every requested metric is shown,
+/// via the same selected_metrics list the non-verbose formatters use.
 fn format_single_count(count: &Count, args: &Args) -> String {
-    let no_flags = !args.max_line_length && !args.lines && !args.words && !args.bytes;
-    if no_flags {
+    if args.show_all() {
         return format!("{} lines", format_number(count.lines));
     }
 
@@ -424,8 +421,8 @@ mod tests {
     }
 
     #[test]
-    fn verbose_single_metric_uses_args_show_helpers() {
-        // Regression test for #53.
+    fn verbose_shows_every_requested_metric() {
+        // Regression test for #53, #44.
         let count = Count {
             lines: 1,
             words: 2,
@@ -434,8 +431,8 @@ mod tests {
         };
         let entries = single_entry(count);
 
-        // -w -c (no -l): must show the first requested metric (words), not
-        // fall back to lines.
+        // -w -c (no -l): must show both requested metrics, not fall back to
+        // lines and not drop either one.
         let args = Args {
             words: true,
             bytes: true,
@@ -443,6 +440,7 @@ mod tests {
         };
         let output = format_verbose_output(&entries, &count, &args, false);
         assert!(output.contains("2 words"));
+        assert!(output.contains("3 bytes"));
         assert!(!output.contains("1 lines"));
 
         // -L alone: must show max, not fall back to lines.
@@ -454,9 +452,7 @@ mod tests {
         assert!(output.contains("4 max"));
         assert!(!output.contains("1 lines"));
 
-        // -l -L: both requested metrics must show (#44 -- a prior version
-        // of this function silently dropped every flag but the first
-        // match, so -l -L showed only lines and -w -c showed only words).
+        // -l -L: both requested metrics must show (#44).
         let args = Args {
             lines: true,
             max_line_length: true,

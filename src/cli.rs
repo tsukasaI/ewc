@@ -79,7 +79,8 @@ impl Args {
         self.max_line_length
     }
 
-    fn show_all(&self) -> bool {
+    /// True when no metric flag was given, i.e. every metric defaults on.
+    pub fn show_all(&self) -> bool {
         !self.lines && !self.words && !self.bytes && !self.max_line_length
     }
 }
