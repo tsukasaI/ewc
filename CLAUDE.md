@@ -36,12 +36,13 @@ and pass sandboxed (observed locally, not CI-checked; no workflow runs
 hardcoded `./target/debug/ewc` (neither that nor a bare
 `./target/release/ewc` would have matched); plain `cargo test` happens to
 produce the exact `./target/debug/ewc` path, masking the bug. Both
-`tests/integration.rs` and `tests/benchmark.rs` now use
+`tests/integration.rs` and `tests/benchmark.rs` were switched to
 `env!("CARGO_BIN_EXE_ewc")` instead (#62, #63), and the `cargoTestFlags`
-skip was removed. `tests/benchmark.rs` itself was later deleted (#36): it
-was never invoked by any automated path (`cargo test` skips `#[ignore]`d
-tests, and no CI/Nix workflow ran it with `--ignored`), and no
-perf-motivated change since had consulted it.
+skip was removed. `tests/benchmark.rs` itself was later deleted (issue
+#36, PR #135): it was never invoked by any automated path (`cargo test`
+skips `#[ignore]`d tests, and no CI/Nix workflow ran it with
+`--ignored`), and neither perf-motivated change since (#22, #23) touched
+it or cited measurements from it.
 
 ## Source of truth
 
