@@ -361,6 +361,27 @@ fn verbose_flag_shows_file_list() {
 }
 
 #[test]
+fn verbose_flag_shows_all_selected_metrics_not_just_the_first() {
+    // Regression test for #44: -v with two or more metric flags used to
+    // silently show only the first-matching one, dropping every other
+    // requested metric.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("file1.txt"), "hello world\n").unwrap();
+
+    let result = run_ewc(&["-v", "-w", "-c", dir.path().to_str().unwrap()]);
+
+    assert!(result.success);
+    let file_line = result
+        .stdout
+        .lines()
+        .find(|l| l.contains("file1.txt"))
+        .expect("output must include the file's line");
+    assert!(file_line.contains("words"));
+    assert!(file_line.contains("bytes"));
+    assert!(!file_line.contains("lines"));
+}
+
+#[test]
 fn verbose_flag_with_nested_directories() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("root.txt"), "root\n").unwrap();

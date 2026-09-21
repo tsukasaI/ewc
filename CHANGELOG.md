@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- `-v` now shows every requested metric on each line (e.g. `-v -w -c` prints `3 words, 16 bytes`), superseding 0.5.0's first-requested-metric-only behavior; the flagless default (lines only) is unchanged
+
 ## [0.5.0] - 2026-09-15
 
 ### Security
