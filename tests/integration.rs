@@ -237,6 +237,41 @@ fn no_color_flag_removes_warning_icon_on_invalid_glob() {
 }
 
 #[test]
+fn invalid_glob_rejected_with_a_valid_file_argument() {
+    // Regression test for #45: an invalid --exclude/--include pattern must
+    // be rejected the same way regardless of whether any argument happens
+    // to be a directory -- previously only directory arguments triggered
+    // glob compilation, so this exact invocation (a valid FILE argument)
+    // used to exit 0 with unfiltered output instead of erroring.
+    let file = create_test_file("hello\n");
+    let result = run_ewc(&["--exclude", "[", file.path().to_str().unwrap()]);
+
+    assert!(!result.success);
+    assert!(result.stderr.contains("Invalid glob pattern"));
+}
+
+#[test]
+fn invalid_glob_rejected_on_stdin() {
+    // Same as invalid_glob_rejected_with_a_valid_file_argument, but for
+    // stdin mode, which also never used to reach glob compilation.
+    let output = Command::new(env!("CARGO_BIN_EXE_ewc"))
+        .args(["--exclude", "["])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            child.stdin.take().unwrap().write_all(b"hello\n")?;
+            child.wait_with_output()
+        })
+        .expect("failed to run ewc");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Invalid glob pattern"));
+}
+
+#[test]
 #[cfg(unix)]
 fn no_color_flag_removes_warning_icon_on_skipped_entry() {
     use std::os::unix::fs::PermissionsExt;
