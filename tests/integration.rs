@@ -1,5 +1,5 @@
-use std::io::Write;
-use std::process::Command;
+use std::io::{Read, Write};
+use std::process::{Command, Stdio};
 
 fn create_test_file(content: &str) -> tempfile::NamedTempFile {
     let mut file = tempfile::NamedTempFile::new().unwrap();
@@ -796,4 +796,40 @@ fn directory_scan_reports_unreadable_file_and_exits_nonzero() {
     assert!(result.stderr.contains("unreadable.txt"));
     // The readable file must still be counted, not silently dropped.
     assert!(result.stdout.contains("(1 file)"));
+}
+
+#[test]
+fn broken_pipe_on_stdout_exits_cleanly_instead_of_panicking() {
+    // Enough files that -v's per-file output exceeds a pipe's buffer, so the
+    // reader can close its end before ewc finishes writing. Regression test
+    // for #33/#43: this used to panic ("failed printing to stdout: Broken
+    // pipe") and exit 101 instead of exiting cleanly.
+    let dir = tempfile::tempdir().unwrap();
+    for i in 0..2000 {
+        std::fs::write(dir.path().join(format!("f{i}.txt")), "hello world\n").unwrap();
+    }
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ewc"))
+        .args(["-v", dir.path().to_str().unwrap()])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn ewc");
+
+    // Read a small amount, then drop the handle while the child likely still
+    // has more to write, forcing its next write to fail with EPIPE.
+    let mut stdout = child.stdout.take().unwrap();
+    let mut buf = [0u8; 64];
+    let _ = stdout.read(&mut buf);
+    drop(stdout);
+
+    let mut stderr_buf = String::new();
+    if let Some(mut stderr) = child.stderr.take() {
+        let _ = stderr.read_to_string(&mut stderr_buf);
+    }
+
+    let status = child.wait().expect("failed to wait on ewc");
+
+    assert_ne!(status.code(), Some(101));
+    assert!(!stderr_buf.contains("panicked"));
 }
