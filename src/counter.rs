@@ -233,14 +233,16 @@ fn is_hidden(entry: &walkdir::DirEntry) -> bool {
 
 // Tests both a lossy-UTF-8 string candidate and a raw-path candidate,
 // deliberately, not redundantly: globset compiles patterns in byte mode
-// (`(?-u)`), so `?` and character classes match single *bytes*. For a
-// non-UTF-8 path, `to_string_lossy()` replaces each invalid byte with a
-// 3-byte U+FFFD before matching, while `is_match(relative_path)` sees the
-// raw `OsStr` bytes unchanged -- the two candidates can therefore match
-// different sets of patterns on the same path. Both arms are kept so a
-// pattern like `foo?` still matches a non-UTF-8 `foo<byte>` path via the
-// raw-byte candidate even though the lossy string candidate sees a
-// different byte length. See the non-UTF-8 regression test below.
+// (`(?-u)`), so `?` and character classes match single *bytes*. On Unix, a
+// non-UTF-8 path's `to_string_lossy()` replaces each maximal invalid byte
+// sequence with a 3-byte U+FFFD before matching, while `is_match(relative_path)`
+// sees the raw `OsStr` bytes unchanged -- the two candidates can therefore
+// match different sets of patterns on the same path (on other platforms,
+// globset's own path-to-bytes conversion already falls back to a lossy
+// string, so the two candidates collapse to the same thing). Both arms are
+// kept so a pattern can match via either byte length. See the non-UTF-8
+// regression tests below, which pin both directions: a pattern the raw
+// candidate matches but the lossy one doesn't, and vice versa.
 fn matches_glob(glob_set: &GlobSet, relative_path: &Path) -> bool {
     let path_str = relative_path.to_string_lossy();
     glob_set.is_match(&*path_str) || glob_set.is_match(relative_path)
@@ -402,6 +404,35 @@ mod tests {
         builder.add(Glob::new("foo?").unwrap());
         let glob_set = builder.build().unwrap();
 
+        // Assert the sub-conditions directly, not just the OR'd result: this
+        // is what makes the test a genuine regression lock on the raw-path
+        // arm specifically, rather than passing for an unrelated reason.
+        assert!(!glob_set.is_match(&*path.to_string_lossy()));
+        assert!(glob_set.is_match(path));
+        assert!(matches_glob(&glob_set, path));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn matches_glob_lossy_string_candidate_matches_non_utf8_path_raw_bytes_would_miss() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+
+        // Same "foo" + one invalid UTF-8 byte path, but with a pattern sized
+        // for the *lossy* string's length (3 literal bytes + 3 wildcard
+        // bytes for U+FFFD's UTF-8 encoding). The raw path is only 4 bytes,
+        // so "foo???" does NOT match it -- only the lossy-string arm of
+        // matches_glob catches this direction. Pins the other half of the
+        // both-candidates-ORed behavior the sibling test above pins.
+        let raw_path = OsStr::from_bytes(b"foo\xFF");
+        let path = Path::new(raw_path);
+
+        let mut builder = GlobSetBuilder::new();
+        builder.add(Glob::new("foo???").unwrap());
+        let glob_set = builder.build().unwrap();
+
+        assert!(glob_set.is_match(&*path.to_string_lossy()));
+        assert!(!glob_set.is_match(path));
         assert!(matches_glob(&glob_set, path));
     }
 
