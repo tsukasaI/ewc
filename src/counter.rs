@@ -364,6 +364,13 @@ fn walk_directory(
         let entry = match entry {
             Ok(entry) => entry,
             Err(e) => {
+                // Failure on the walk root means the argument itself is
+                // unreadable: a failed input, not an empty directory.
+                if e.depth() == 0 {
+                    return Err(e
+                        .into_io_error()
+                        .unwrap_or_else(|| io::Error::other("failed to read directory")));
+                }
                 let entry_path = e
                     .path()
                     .map_or_else(|| path.to_path_buf(), Path::to_path_buf);
@@ -1207,6 +1214,26 @@ mod tests {
         assert!(skipped.is_empty());
         assert_eq!(file_count, 1); // Only root.txt
         assert_eq!(count.words, 1); // "root"
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn count_directory_unreadable_root_is_error() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let locked = dir.path().join("locked");
+        std::fs::create_dir(&locked).unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let config = default_config();
+        let result = count_directory(&locked, &config);
+        let _ = std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755));
+
+        // Running as root bypasses permission checks.
+        if let Err(e) = result {
+            assert_eq!(e.kind(), io::ErrorKind::PermissionDenied);
+        }
     }
 
     #[test]

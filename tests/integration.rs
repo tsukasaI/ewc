@@ -1012,3 +1012,52 @@ fn broken_pipe_on_stdout_exits_cleanly_instead_of_panicking() {
     assert_ne!(status.code(), Some(101));
     assert!(!stderr_buf.contains("panicked"));
 }
+
+#[test]
+#[cfg(unix)]
+fn json_unreadable_directory_argument_reports_error_shape() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let locked = dir.path().join("locked");
+    std::fs::create_dir(&locked).unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    let result = run_ewc(&["--json", locked.to_str().unwrap()]);
+
+    let _ = std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755));
+
+    if result.success {
+        // Running as root bypasses permission checks; nothing to assert.
+        return;
+    }
+    let parsed: serde_json::Value = serde_json::from_str(&result.stdout).unwrap();
+    assert_eq!(parsed["file"], locked.to_str().unwrap());
+    assert!(parsed["error"].is_string());
+    assert!(parsed.get("directory").is_none());
+}
+
+#[test]
+#[cfg(unix)]
+fn unreadable_directory_argument_prints_no_empty_block_or_total() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let locked = dir.path().join("locked");
+    std::fs::create_dir(&locked).unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let good = dir.path().join("good.txt");
+    std::fs::write(&good, "hello world\n").unwrap();
+
+    let result = run_ewc(&[locked.to_str().unwrap(), good.to_str().unwrap()]);
+
+    let _ = std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755));
+
+    if result.success {
+        // Running as root bypasses permission checks; nothing to assert.
+        return;
+    }
+    assert!(!result.stdout.contains("(0 files)"));
+    assert!(!result.stdout.contains("Total"));
+    assert!(result.stdout.contains("good.txt"));
+}
