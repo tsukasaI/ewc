@@ -841,6 +841,16 @@ mod tests {
         assert!(FilterConfig::new(false, &["{a,{b,c}}".to_string()], &[]).is_ok());
     }
 
+    #[test]
+    #[cfg(unix)]
+    fn build_globset_escaped_braces_match_literally() {
+        // On Unix globset treats `\{` as an escape, so this is a literal
+        // name and not an alternation.
+        let set = FilterConfig::build_globset(&[r"\{literal\}".to_string()]).unwrap();
+        assert!(set.is_match("{literal}"));
+        assert!(!set.is_match("literal"));
+    }
+
     fn config_with_hidden() -> FilterConfig {
         FilterConfig::new(true, &[], &[]).unwrap()
     }
