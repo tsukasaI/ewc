@@ -43,13 +43,18 @@ pub fn format_number(n: u64) -> String {
         .join(",")
 }
 
+const MAX_UNIT: &str = "max";
+const LABEL_WIDTH: usize = 8;
+
 /// Active metrics in fixed display order: max line length, lines, words,
-/// bytes. `label` is the aligned-output name (padded to width 8 by the
-/// caller); `unit` is the compact-output suffix.
+/// bytes. `label` is the aligned-output name (at most `LABEL_WIDTH` chars,
+/// right-aligned by the caller). `unit` is the compact and verbose name:
+/// compact renders max as `max:N` and the others as `N unit`; verbose
+/// renders every metric as `N unit`, including `N max`.
 fn selected_metrics(count: &Count, args: &Args) -> Vec<(&'static str, &'static str, u64)> {
     let mut metrics = Vec::new();
     if args.show_max_line_length() {
-        metrics.push(("Max Line", "max", count.max_line_length));
+        metrics.push(("Max Line", MAX_UNIT, count.max_line_length));
     }
     if args.show_lines() {
         metrics.push(("Lines", "lines", count.lines));
@@ -66,7 +71,7 @@ fn selected_metrics(count: &Count, args: &Args) -> Vec<(&'static str, &'static s
 fn format_count_lines(count: &Count, args: &Args) -> Vec<String> {
     selected_metrics(count, args)
         .into_iter()
-        .map(|(label, _, value)| format!("{label:>8}: {:>10}", format_number(value)))
+        .map(|(label, _, value)| format!("{label:>LABEL_WIDTH$}: {:>10}", format_number(value)))
         .collect()
 }
 
@@ -126,7 +131,7 @@ fn format_compact_counts(count: &Count, args: &Args) -> String {
             let n = format_number(value);
             // Max line length is the one metric rendered as a prefix, not a
             // suffix, matching its pre-extraction "max:N" form.
-            if unit == "max" {
+            if unit == MAX_UNIT {
                 format!("max:{n}")
             } else {
                 format!("{n} {unit}")
@@ -765,6 +770,40 @@ mod tests {
         assert!(!output.contains("Lines:"));
         assert!(!output.contains("Words:"));
         assert!(!output.contains("Bytes:"));
+    }
+
+    #[test]
+    fn aligned_output_pins_exact_column_spacing() {
+        let count = Count {
+            lines: 50,
+            words: 200,
+            bytes: 1500,
+            max_line_length: 120,
+        };
+        let args = Args {
+            lines: true,
+            max_line_length: true,
+            ..default_args()
+        };
+        let output = format_output("file.txt", &count, OutputKind::File, &args, false);
+        assert!(output.contains("Max Line:        120\n"));
+        assert!(output.contains("   Lines:         50"));
+    }
+
+    #[test]
+    fn every_metric_label_fits_label_width() {
+        let args = Args {
+            lines: true,
+            words: true,
+            bytes: true,
+            max_line_length: true,
+            ..default_args()
+        };
+        let metrics = selected_metrics(&Count::default(), &args);
+        assert_eq!(metrics.len(), 4);
+        for (label, _, _) in metrics {
+            assert!(label.len() <= LABEL_WIDTH, "{label} exceeds LABEL_WIDTH");
+        }
     }
 
     #[test]
