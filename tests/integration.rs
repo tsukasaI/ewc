@@ -1007,8 +1007,7 @@ fn broken_pipe_on_stdout_exits_cleanly_instead_of_panicking() {
 
     let status = child.wait().expect("failed to wait on ewc");
 
-    #[cfg(unix)]
-    assert_eq!(status.code(), Some(141));
+    assert_eq!(status.code(), Some(141), "stderr: {stderr_buf}");
     assert_ne!(status.code(), Some(101));
     assert!(!stderr_buf.contains("panicked"));
 }
