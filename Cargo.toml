@@ -2,6 +2,7 @@
 name = "ewc"
 version = "0.6.0"
 edition = "2021"
+rust-version = "1.88"
 description = "Enhanced Word Count - A modern alternative to wc"
 license = "MIT"
 authors = ["ino <tsukasaI@users.noreply.github.com>"]

@@ -245,6 +245,9 @@ fn main() {
         // program failure; exit the way a SIGPIPE-killed process would
         // (matching GNU/BSD wc under `set -o pipefail`), with no further
         // output to the dead pipe.
+        // 141 is the unix SIGPIPE convention (128 + 13), applied on every
+        // platform including Windows, where a write to a closed pipe
+        // (ERROR_NO_DATA) also surfaces as ErrorKind::BrokenPipe.
         Err(e) if e.kind() == io::ErrorKind::BrokenPipe => process::exit(141),
         Err(e) => {
             // Best-effort, matching the other top-level error paths: if
