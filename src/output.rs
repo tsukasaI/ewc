@@ -45,6 +45,7 @@ pub fn format_number(n: u64) -> String {
 
 const MAX_UNIT: &str = "max";
 const LABEL_WIDTH: usize = 8;
+const VALUE_WIDTH: usize = 10;
 
 /// Active metrics in fixed display order: max line length, lines, words,
 /// bytes. `label` is the aligned-output name (at most `LABEL_WIDTH` chars,
@@ -71,7 +72,12 @@ fn selected_metrics(count: &Count, args: &Args) -> Vec<(&'static str, &'static s
 fn format_count_lines(count: &Count, args: &Args) -> Vec<String> {
     selected_metrics(count, args)
         .into_iter()
-        .map(|(label, _, value)| format!("{label:>LABEL_WIDTH$}: {:>10}", format_number(value)))
+        .map(|(label, _, value)| {
+            format!(
+                "{label:>LABEL_WIDTH$}: {:>VALUE_WIDTH$}",
+                format_number(value)
+            )
+        })
         .collect()
 }
 
@@ -132,7 +138,7 @@ fn format_compact_counts(count: &Count, args: &Args) -> String {
             // Max line length is the one metric rendered as a prefix, not a
             // suffix, matching its pre-extraction "max:N" form.
             if unit == MAX_UNIT {
-                format!("max:{n}")
+                format!("{MAX_UNIT}:{n}")
             } else {
                 format!("{n} {unit}")
             }
@@ -786,8 +792,8 @@ mod tests {
             ..default_args()
         };
         let output = format_output("file.txt", &count, OutputKind::File, &args, false);
-        assert!(output.contains("Max Line:        120\n"));
-        assert!(output.contains("   Lines:         50"));
+        assert!(output.contains("\nMax Line:        120\n"));
+        assert!(output.ends_with("\n   Lines:         50"));
     }
 
     #[test]
@@ -802,7 +808,10 @@ mod tests {
         let metrics = selected_metrics(&Count::default(), &args);
         assert_eq!(metrics.len(), 4);
         for (label, _, _) in metrics {
-            assert!(label.len() <= LABEL_WIDTH, "{label} exceeds LABEL_WIDTH");
+            assert!(
+                label.chars().count() <= LABEL_WIDTH,
+                "{label} exceeds LABEL_WIDTH"
+            );
         }
     }
 
