@@ -17,41 +17,62 @@ use ewc::output::{
 
 const WARNING_ICON: &str = "\u{26A0}\u{FE0F}  ";
 
+// Not `is_directory: bool` plus `entries: Option<..>`: that pair admits a
+// file carrying a per-file breakdown.
+enum ProcessKind {
+    File,
+    Directory {
+        file_count: usize,
+        /// `Some` only when processed with `verbose: true`; carries the
+        /// per-file breakdown format_verbose_output needs.
+        entries: Option<Vec<FileEntry>>,
+    },
+}
+
 struct ProcessResult {
     count: Count,
-    file_count: usize,
     skipped: Vec<SkippedEntry>,
-    is_directory: bool,
-    /// `Some` only for a directory processed with `verbose: true`; carries
-    /// the per-file breakdown format_verbose_output needs. `None` for a
-    /// file, or for a directory processed without --verbose, where only
-    /// the aggregate count/file_count are needed.
-    entries: Option<Vec<FileEntry>>,
+    kind: ProcessKind,
+}
+
+impl ProcessResult {
+    fn file_count(&self) -> usize {
+        match self.kind {
+            ProcessKind::File => 1,
+            ProcessKind::Directory { file_count, .. } => file_count,
+        }
+    }
+
+    fn output_kind(&self) -> OutputKind {
+        match self.kind {
+            ProcessKind::File => OutputKind::File,
+            ProcessKind::Directory { file_count, .. } => OutputKind::Directory(file_count),
+        }
+    }
 }
 
 fn process_path(path: &Path, config: &FilterConfig, verbose: bool) -> io::Result<ProcessResult> {
     if !path.is_dir() {
         return Ok(ProcessResult {
             count: count_file(path)?,
-            file_count: 1,
             skipped: Vec::new(),
-            is_directory: false,
-            entries: None,
+            kind: ProcessKind::File,
         });
     }
 
     let (entries, count, skipped) = count_directory_detailed(path, config)?;
     Ok(ProcessResult {
         count,
-        file_count: entries.len(),
         skipped,
-        is_directory: true,
-        entries: verbose.then_some(entries),
+        kind: ProcessKind::Directory {
+            file_count: entries.len(),
+            entries: verbose.then_some(entries),
+        },
     })
 }
 
 /// Formats a processed argument's output line(s): the per-file verbose
-/// breakdown when `result.entries` is set, otherwise the normal or compact
+/// breakdown when the result carries entries, otherwise the normal or compact
 /// single-block form.
 fn format_process_result(
     name: &str,
@@ -59,14 +80,14 @@ fn format_process_result(
     args: &Args,
     is_terminal: bool,
 ) -> String {
-    if let Some(entries) = &result.entries {
+    if let ProcessKind::Directory {
+        entries: Some(entries),
+        ..
+    } = &result.kind
+    {
         return format_verbose_output(entries, &result.count, args, is_terminal);
     }
-    let kind = if result.is_directory {
-        OutputKind::Directory(result.file_count)
-    } else {
-        OutputKind::File
-    };
+    let kind = result.output_kind();
     if args.compact {
         format_compact_output(name, &result.count, kind, args, is_terminal)
     } else {
@@ -330,11 +351,7 @@ fn run_json_mode(args: &Args, config: &FilterConfig) -> io::Result<bool> {
             has_error = true;
         }
 
-        let kind = if result.is_directory {
-            OutputKind::Directory(result.file_count)
-        } else {
-            OutputKind::File
-        };
+        let kind = result.output_kind();
         results.push(JsonFileResult {
             name: file.to_string_lossy().into_owned(),
             count: result.count,
@@ -404,7 +421,7 @@ fn run_normal_mode(args: &Args, config: &FilterConfig) -> io::Result<bool> {
         }
 
         total_count += result.count;
-        total_file_count += result.file_count;
+        total_file_count += result.file_count();
         successful_args += 1;
         needs_leading_blank = !args.compact;
     }
