@@ -843,6 +843,17 @@ mod tests {
     }
 
     #[test]
+    fn build_globset_counts_escaped_braces_toward_depth() {
+        assert!(FilterConfig::new(false, &[r"\{".repeat(65)], &[]).is_err());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn build_globset_accepts_escaped_braces_at_depth_cap() {
+        assert!(FilterConfig::new(false, &[r"\{".repeat(64)], &[]).is_ok());
+    }
+
+    #[test]
     #[cfg(unix)]
     fn build_globset_escaped_braces_match_literally() {
         // On Unix globset treats `\{` as an escape, so this is a literal
@@ -1239,16 +1250,18 @@ mod tests {
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
 
         let config = default_config();
+        let readable = std::fs::read_dir(&locked).is_ok(); // true when running as root
         let result = count_directory(&locked, &config);
         let _ = std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755));
 
         match result {
-            Ok((_, 1, skipped)) if skipped.is_empty() => {} // running as root
+            Ok((_, 1, skipped)) if readable && skipped.is_empty() => {}
             Ok((count, file_count, skipped)) => panic!(
-                "unreadable root returned Ok instead of Err: {count:?}, {file_count} files, {} skipped",
+                "unexpected Ok (readable: {readable}): {count:?}, {file_count} files, {} skipped",
                 skipped.len()
             ),
-            Err(e) => assert_eq!(e.kind(), io::ErrorKind::PermissionDenied),
+            Err(e) if !readable => assert_eq!(e.kind(), io::ErrorKind::PermissionDenied),
+            Err(e) => panic!("readable root returned Err: {e}"),
         }
     }
 

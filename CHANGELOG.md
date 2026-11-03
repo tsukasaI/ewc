@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- An unreadable directory argument is now reported as a failed input: text output no longer prints a zero-count block for it, `--json` no longer emits a fake `{"directory": ..., "file_count": 0, "skipped_count": 1}` object (a single argument gives `{"file", "error"}`; with multiple arguments it is left out of `files`), and it no longer contributes to Total / `total.file_count`
+- An unreadable directory argument is now reported as a failed input: text output no longer prints a zero-count block for it, `--json` no longer emits a fake `{"directory": ..., "file_count": 0, "skipped_count": 1}` object (a single argument gives `{"file", "error"}`; with multiple arguments it is left out of `files`), it no longer counts toward `total.skipped_count`, and it no longer counts as a successful input, so text output for e.g. `ewc locked good.txt` no longer prints a Total block for the one remaining argument
 
 ## [0.6.0] - 2026-09-21
 
