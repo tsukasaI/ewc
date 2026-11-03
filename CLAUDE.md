@@ -3,8 +3,9 @@
 `ewc` (Enhanced Word Count) is a Rust CLI, a modern `wc` alternative with
 human-readable output, JSON, glob include/exclude, and parallel directory
 scanning. ~1.8k LOC (`src/`) + ~600 LOC tests (`tokei`). Published on
-crates.io and a Nix flake — current version: see `Cargo.toml` (it is `0.6.0` as of `ea12cd8`;
-`flake.nix` derives it from there via `builtins.fromTOML`). No Homebrew
+crates.io and a Nix flake — current version: see `Cargo.toml` (it is
+`0.6.0` as of `ea12cd8`; `flake.nix` derives it from there via
+`builtins.fromTOML`). No Homebrew
 tap exists; the README section that referenced one was removed, and the
 stale `Formula/ewc.rb` deleted (#75), since standing up a real tap is
 outside this repo's scope. `cliff.toml` was similarly stale and deleted
