@@ -522,22 +522,24 @@ fn verbose_directory_reports_unreadable_file_and_exits_nonzero() {
     use std::os::unix::fs::PermissionsExt;
 
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("readable.txt"), "hello world\n").unwrap();
-    let unreadable = dir.path().join("unreadable.txt");
-    std::fs::write(&unreadable, "secret\n").unwrap();
-    std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o000)).unwrap();
+    std::fs::write(dir.path().join("ok.txt"), "hello world\n").unwrap();
+    let locked = dir.path().join("locked.txt");
+    std::fs::write(&locked, "secret\n").unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
 
     let result = run_ewc(&["-v", dir.path().to_str().unwrap()]);
 
-    let _ = std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o644));
+    let _ = std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o644));
 
-    if result.success {
+    if result.stdout.contains("Total (2 files)") {
         // Running as root bypasses permission checks; nothing to assert.
+        // Detected from the output, not the exit code under test.
         return;
     }
-    assert!(result.stdout.contains("readable.txt"));
+    assert!(!result.success);
+    assert!(result.stdout.contains("ok.txt"));
     assert!(result.stdout.contains("Total (1 file)"));
-    assert!(result.stderr.contains("unreadable.txt"));
+    assert!(result.stderr.contains("locked.txt"));
 }
 
 // Phase 4: --json tests
