@@ -516,6 +516,30 @@ fn verbose_with_no_color() {
     assert!(result.stdout.contains("file1.txt"));
 }
 
+#[test]
+#[cfg(unix)]
+fn verbose_directory_reports_unreadable_file_and_exits_nonzero() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("readable.txt"), "hello world\n").unwrap();
+    let unreadable = dir.path().join("unreadable.txt");
+    std::fs::write(&unreadable, "secret\n").unwrap();
+    std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    let result = run_ewc(&["-v", dir.path().to_str().unwrap()]);
+
+    let _ = std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o644));
+
+    if result.success {
+        // Running as root bypasses permission checks; nothing to assert.
+        return;
+    }
+    assert!(result.stdout.contains("readable.txt"));
+    assert!(result.stdout.contains("Total (1 file)"));
+    assert!(result.stderr.contains("unreadable.txt"));
+}
+
 // Phase 4: --json tests
 #[test]
 fn json_flag_single_file() {
