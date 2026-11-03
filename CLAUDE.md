@@ -3,7 +3,7 @@
 `ewc` (Enhanced Word Count) is a Rust CLI, a modern `wc` alternative with
 human-readable output, JSON, glob include/exclude, and parallel directory
 scanning. ~1.8k LOC (`src/`) + ~600 LOC tests (`tokei`). Published on
-crates.io and a Nix flake — current version `0.4.0` (`Cargo.toml`;
+crates.io and a Nix flake — current version: see `Cargo.toml` (it is `0.6.0` as of `ea12cd8`;
 `flake.nix` derives it from there via `builtins.fromTOML`). No Homebrew
 tap exists; the README section that referenced one was removed, and the
 stale `Formula/ewc.rb` deleted (#75), since standing up a real tap is
@@ -75,7 +75,7 @@ if either changes.
 
 - Deterministic output despite `rayon` parallelism: directory entries are
   collected via `par_iter()` then explicitly `sort_by` path
-  (`src/counter.rs:334-335`) before printing.
+  (`count_directory_detailed` in `src/counter.rs`) before printing.
 - Dotfiles excluded by default during directory walks; `-a`/`--all`
   includes them (`is_hidden` in `src/counter.rs`).
 
@@ -85,10 +85,8 @@ if either changes.
   in them rot on every Actions bump — re-read the files, don't trust this
   summary.
 - Re-diff `spec.md` against `src/cli.rs` and README.md whenever a CLI flag
-  changes; state above is current as of #114. The `src/counter.rs`
-  line reference above will drift once PRs touching that file merge
-  (several are in flight as of this writing); re-check it rather than
-  trusting the number.
+  changes; state above is current as of #114 and was re-checked against
+  `ea12cd8` (#141) with no drift found.
 - Integration tests under `nix build` have not actually been verified
   since the `--lib` skip was removed (#62): run `nix build` and confirm
   `tests/integration.rs` appears in the checkPhase log.
