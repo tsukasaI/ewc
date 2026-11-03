@@ -165,10 +165,11 @@ $ cat file.txt | ewc -
   JSON, and `--no-color` suppresses the icon on those
 - Exactly one input -- stdin, or a single file/directory argument -- that
   could not be opened/read at all (nonexistent path, permission denied on
-  the argument itself, an unreadable stdin) emits the same single-object
-  error shape, `{"file": "<name>", "error": "<message>"}`, rather than
-  either a fake zeroed-count success object or the `{"files": [...],
-  "total": {...}}` envelope with an empty `files` array (#46, #108). This
+  a file, a directory whose own listing can't be read, an unreadable
+  stdin) emits the same single-object error shape,
+  `{"file": "<name>", "error": "<message>"}`, rather than the
+  `{"files": [...], "total": {...}}` envelope with an empty `files`
+  array (#46, #108, #141). This
   also applies when an invalid `--exclude`/`--include` pattern rejects the
   run before anything is processed. Reading from stdin always produces a
   single object either way (this error shape on failure, the normal
