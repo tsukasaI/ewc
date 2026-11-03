@@ -50,9 +50,10 @@ it or cited measurements from it.
 As of this writing, `spec.md`'s options table, behavior notes, Project
 Structure, and JSON example match the actual clap flags in `src/cli.rs`,
 README, and `src/output.rs`'s formatting (width, separator length) — #83 and
-#93 fixed several drifts, and #37 fixed one more (`--no-color`'s clap help
-text still promised "Disable colors and icons" after colored output was
-removed in #19; it now reads "Disable icons", matching README.md and
+#93 fixed several drifts, and #114 (issue #37) fixed one more
+(`--no-color`'s clap help text still promised "Disable colors and icons"
+after #19 removed the never-used `colored` dependency — color output was
+never implemented; it now reads "Disable icons", matching README.md and
 spec.md, which already described the real behavior). When docs disagree with
 code, code wins — re-diff `spec.md` against `src/cli.rs` and `src/output.rs`
 if either changes.
@@ -84,7 +85,7 @@ if either changes.
   in them rot on every Actions bump — re-read the files, don't trust this
   summary.
 - Re-diff `spec.md` against `src/cli.rs` and README.md whenever a CLI flag
-  changes; state above is current as of `e19ee17`. The `src/counter.rs`
+  changes; state above is current as of #114. The `src/counter.rs`
   line reference above will drift once PRs touching that file merge
   (several are in flight as of this writing); re-check it rather than
   trusting the number.
