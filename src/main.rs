@@ -112,8 +112,7 @@ fn report_skipped(
     Ok(!skipped.is_empty())
 }
 
-/// Whether the input is stdin: no arguments, or a single bare "-"
-/// (matching wc). The one place this rule lives.
+// No arguments, or a single bare "-" (matching wc), means stdin.
 fn reads_stdin(files: &[PathBuf]) -> bool {
     match files {
         [] => true,
@@ -197,7 +196,7 @@ fn main() {
     };
 
     // Built once, before mode dispatch, so an invalid --exclude/--include
-    // pattern is caught even in stdin mode instead of being silently ignored.
+    // pattern is rejected in every mode, stdin included.
     let config = match create_filter_config(&args) {
         Ok(config) => config,
         Err(e) => {
@@ -313,7 +312,8 @@ fn run_json_mode(args: &Args, config: &FilterConfig) -> io::Result<bool> {
     let mut total_count = Count::default();
     let mut has_error = false;
     // Set only when the single argument (if there is exactly one) fails;
-    // it then emits the same error shape stdin uses (#46, #108).
+    // that failure is then emitted in the same {"file", "error"} shape
+    // stdin uses (#46, #108).
     let mut single_arg_error: Option<String> = None;
 
     for file in &args.files {

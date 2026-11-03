@@ -169,7 +169,7 @@ $ cat file.txt | ewc -
   stdin) emits the same single-object error shape,
   `{"file": "<name>", "error": "<message>"}`, rather than the
   `{"files": [...], "total": {...}}` envelope with an empty `files`
-  array (#46, #108, #141). This
+  array (#46, #108; PR #141). This
   also applies when an invalid `--exclude`/`--include` pattern rejects the
   run before anything is processed. Reading from stdin always produces a
   single object either way (this error shape on failure, the normal
