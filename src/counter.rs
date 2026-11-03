@@ -1235,15 +1235,20 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let locked = dir.path().join("locked");
         std::fs::create_dir(&locked).unwrap();
+        std::fs::write(locked.join("inner.txt"), "inner\n").unwrap();
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
 
         let config = default_config();
         let result = count_directory(&locked, &config);
         let _ = std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755));
 
-        // Running as root bypasses permission checks.
-        if let Err(e) = result {
-            assert_eq!(e.kind(), io::ErrorKind::PermissionDenied);
+        match result {
+            Ok((_, 1, skipped)) if skipped.is_empty() => {} // running as root
+            Ok((count, file_count, skipped)) => panic!(
+                "unreadable root returned Ok instead of Err: {count:?}, {file_count} files, {} skipped",
+                skipped.len()
+            ),
+            Err(e) => assert_eq!(e.kind(), io::ErrorKind::PermissionDenied),
         }
     }
 

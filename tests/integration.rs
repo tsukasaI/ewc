@@ -1035,6 +1035,7 @@ fn json_unreadable_directory_argument_reports_error_shape() {
     assert_eq!(parsed["file"], locked.to_str().unwrap());
     assert!(parsed["error"].is_string());
     assert!(parsed.get("directory").is_none());
+    assert!(result.stderr.contains("locked"));
 }
 
 #[test]
@@ -1060,4 +1061,5 @@ fn unreadable_directory_argument_prints_no_empty_block_or_total() {
     assert!(!result.stdout.contains("(0 files)"));
     assert!(!result.stdout.contains("Total"));
     assert!(result.stdout.contains("good.txt"));
+    assert!(result.stderr.contains("locked"));
 }

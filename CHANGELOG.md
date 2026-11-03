@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- An unreadable directory argument is now reported as a failed input: text output no longer prints a zero-count block for it, `--json` no longer emits a fake `{"directory": ..., "file_count": 0, "skipped_count": 1}` object (a single argument gives `{"file", "error"}`; with multiple arguments it is left out of `files`), and it no longer contributes to Total / `total.file_count`
+
 ## [0.6.0] - 2026-09-21
 
 ### Security
