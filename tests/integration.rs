@@ -282,6 +282,30 @@ fn invalid_glob_rejected_on_stdin() {
 }
 
 #[test]
+fn invalid_glob_json_on_stdin_emits_single_error_object() {
+    // Both spellings of "read stdin" (no argument, and a bare "-") must
+    // produce the same single {"file","error"} object on stdout.
+    for args in [
+        &["--json", "--exclude", "["][..],
+        &["--json", "--exclude", "[", "-"][..],
+    ] {
+        let result = run_ewc_with_stdin(args, "hello\n");
+
+        assert!(!result.success, "args: {args:?}");
+        let parsed: serde_json::Value = serde_json::from_str(&result.stdout)
+            .unwrap_or_else(|e| panic!("stdout is not one JSON value for {args:?}: {e}"));
+        assert_eq!(parsed["file"], "<stdin>", "args: {args:?}");
+        assert!(
+            parsed["error"]
+                .as_str()
+                .is_some_and(|m| m.contains("Invalid glob pattern")),
+            "args: {args:?}, got: {parsed}"
+        );
+        assert!(parsed.get("files").is_none(), "args: {args:?}");
+    }
+}
+
+#[test]
 #[cfg(unix)]
 fn no_color_flag_removes_warning_icon_on_skipped_entry() {
     use std::os::unix::fs::PermissionsExt;
