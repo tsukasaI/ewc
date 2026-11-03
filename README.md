@@ -94,6 +94,8 @@ ewc [OPTIONS] [FILE]...
 | `--help` | `-h` | Print help |
 | `--version` | `-V` | Print version |
 
+A glob pattern longer than 4096 bytes, or with `{...}` nesting deeper than 64 levels, is rejected with an error.
+
 ### Examples
 
 ```bash

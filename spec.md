@@ -311,6 +311,9 @@ The `--exclude` and `--include` options filter files during directory traversal 
 - There is no implicit basename matching: `--exclude "Cargo.lock"` does
   **not** remove `sub/Cargo.lock` (unlike `.gitignore` conventions); write
   `--exclude "**/Cargo.lock"` or `--exclude "*.lock"` to match at any depth
+- A pattern longer than 4096 bytes, or with `{...}` nesting deeper than 64
+  levels, is rejected with an error (exactly 4096 bytes and exactly 64
+  levels are accepted). Every `{` counts toward depth, escaped or not
 
 #### Examples
 
