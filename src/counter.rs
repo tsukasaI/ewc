@@ -296,9 +296,10 @@ pub fn count_from_reader<R: Read>(mut reader: R) -> io::Result<Count> {
 // Compares the raw encoded bytes rather than going through to_str(), which
 // returns None (treated as "not hidden") for any name that isn't valid
 // UTF-8 -- a non-UTF-8 dotfile would otherwise be counted even without -a.
-// OsStr::as_encoded_bytes' encoding is unspecified but guarantees ASCII
-// bytes (like '.') round-trip unchanged, so comparing against b'.' is valid
-// cross-platform, unlike a Unix-only OsStrExt::as_bytes cast.
+// Reading only the first byte is sound because OsStr::as_encoded_bytes() is
+// self-synchronizing: an ASCII byte such as '.' never appears inside a
+// multi-byte sequence, so a leading b'.' is always a real leading dot. Not a
+// Unix-only OsStrExt::as_bytes cast, which would not compile on Windows.
 fn is_hidden(entry: &walkdir::DirEntry) -> bool {
     entry.file_name().as_encoded_bytes().first() == Some(&b'.')
 }
@@ -1515,23 +1516,50 @@ mod tests {
     #[test]
     #[cfg(target_os = "linux")]
     fn count_directory_excludes_non_utf8_hidden_file() {
-        // Regression test for #47: is_hidden used to go through
-        // OsStr::to_str(), which returns None (treated as "not hidden") for
-        // any name that isn't valid UTF-8. Only reproducible on Linux --
-        // macOS's filesystem (APFS/HFS+) rejects non-UTF-8 filenames
-        // outright.
+        // A hidden name that isn't valid UTF-8 is excluded like any other
+        // dotfile. Runs only on Linux (CI's ubuntu runner): macOS filesystems
+        // reject non-UTF-8 names outright.
         use std::os::unix::ffi::OsStringExt;
 
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("visible.txt"), "visible\n").unwrap();
 
         let hidden_name = std::ffi::OsString::from_vec(b".hidden\xFF.txt".to_vec());
-        std::fs::write(dir.path().join(&hidden_name), "hidden\n").unwrap();
+        std::fs::write(dir.path().join(&hidden_name), "hidden\n")
+            .expect("tmpdir's filesystem must accept non-UTF-8 file names");
 
-        let (_, file_count, _) = count_directory(dir.path(), &default_config()).unwrap();
+        let (_, file_count, skipped) = count_directory(dir.path(), &default_config()).unwrap();
+        assert!(skipped.is_empty());
         assert_eq!(file_count, 1); // Only visible file
 
-        let (_, file_count, _) = count_directory(dir.path(), &config_with_hidden()).unwrap();
+        let (_, file_count, skipped) = count_directory(dir.path(), &config_with_hidden()).unwrap();
+        assert!(skipped.is_empty());
+        assert_eq!(file_count, 2); // Both, with -a
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn count_directory_excludes_non_utf8_hidden_directory() {
+        // A hidden directory whose name isn't valid UTF-8 is pruned with its
+        // contents. Runs only on Linux, like the file variant above.
+        use std::os::unix::ffi::OsStringExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("visible.txt"), "visible\n").unwrap();
+
+        let hidden_dir = dir
+            .path()
+            .join(std::ffi::OsString::from_vec(b".hidden\xFF".to_vec()));
+        std::fs::create_dir(&hidden_dir)
+            .expect("tmpdir's filesystem must accept non-UTF-8 file names");
+        std::fs::write(hidden_dir.join("inner.txt"), "inner\n").unwrap();
+
+        let (_, file_count, skipped) = count_directory(dir.path(), &default_config()).unwrap();
+        assert!(skipped.is_empty());
+        assert_eq!(file_count, 1); // Only visible file
+
+        let (_, file_count, skipped) = count_directory(dir.path(), &config_with_hidden()).unwrap();
+        assert!(skipped.is_empty());
         assert_eq!(file_count, 2); // Both, with -a
     }
 }
