@@ -1,7 +1,7 @@
 use clap::Parser;
 use std::io;
 use std::io::{IsTerminal, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process;
 
 use ewc::cli::Args;
@@ -112,6 +112,15 @@ fn report_skipped(
     Ok(!skipped.is_empty())
 }
 
+// No arguments, or a single bare "-" (matching wc), means stdin.
+fn reads_stdin(files: &[PathBuf]) -> bool {
+    match files {
+        [] => true,
+        [only] => only.as_os_str() == "-",
+        _ => false,
+    }
+}
+
 fn create_filter_config(args: &Args) -> io::Result<FilterConfig> {
     FilterConfig::new(args.all, &args.exclude, &args.include)
 }
@@ -187,7 +196,7 @@ fn main() {
     };
 
     // Built once, before mode dispatch, so an invalid --exclude/--include
-    // pattern is caught even in stdin mode instead of being silently ignored.
+    // pattern is rejected in every mode, stdin included.
     let config = match create_filter_config(&args) {
         Ok(config) => config,
         Err(e) => {
@@ -202,16 +211,17 @@ fn main() {
             );
             if args.json {
                 // Keep stdout valid JSON even on failure. A single input
-                // (stdin, or one file/directory argument) uses the same
-                // error shape a single failing input uses everywhere else
-                // (#46, #108); more than one argument uses the multi-input
-                // envelope, matching run_json_mode's all-inputs-failed
-                // behavior.
-                let single_input_name = match args.files.as_slice() {
-                    [] => Some("<stdin>".to_string()),
-                    [only] if only.as_os_str() == "-" => Some("<stdin>".to_string()),
-                    [only] => Some(only.to_string_lossy().into_owned()),
-                    _ => None,
+                // (stdin, or one file/directory argument) emits the same
+                // {"file", "error"} object a single failing input uses
+                // everywhere else (#46, #108); more than one argument emits
+                // the multi-input envelope, as run_json_mode does when every
+                // input fails.
+                let single_input_name = if reads_stdin(&args.files) {
+                    Some("<stdin>".to_string())
+                } else if let [only] = args.files.as_slice() {
+                    Some(only.to_string_lossy().into_owned())
+                } else {
+                    None
                 };
                 let json = match single_input_name {
                     Some(name) => format_json_error(&name, &e.to_string()),
@@ -223,11 +233,7 @@ fn main() {
         }
     };
 
-    // A single bare "-" is a request to read stdin, matching wc.
-    let reads_stdin =
-        args.files.is_empty() || (args.files.len() == 1 && args.files[0].as_os_str() == "-");
-
-    let result = if reads_stdin {
+    let result = if reads_stdin(&args.files) {
         run_stdin_mode(&args)
     } else if args.json {
         run_json_mode(&args, &config)
@@ -266,11 +272,9 @@ fn run_stdin_mode(args: &Args) -> io::Result<bool> {
         Err(e) => {
             writeln!(err, "{}<stdin>: {e}", icon(args.no_color, WARNING_ICON))?;
             if args.json {
-                // A real error object, not the {files, total} envelope and
-                // not a fake zeroed-count success object: stdin is always
-                // exactly one input, so its JSON failure shape is the same
-                // one a single failing file/directory argument uses (#46,
-                // #108).
+                // stdin is always exactly one input, so its JSON failure
+                // shape is the single {"file", "error"} object that a lone
+                // failing file/directory argument also uses (#46, #108).
                 writeln!(out, "{}", format_json_error("<stdin>", &e.to_string()))?;
             }
             return Ok(true);
@@ -307,9 +311,9 @@ fn run_json_mode(args: &Args, config: &FilterConfig) -> io::Result<bool> {
     let mut results: Vec<JsonFileResult> = Vec::new();
     let mut total_count = Count::default();
     let mut has_error = false;
-    // Set only when the single argument (if there is exactly one) fails,
-    // so a single-argument failure can emit the same error shape stdin
-    // uses instead of falling back to the multi-input envelope (#46, #108).
+    // Set only when the single argument (if there is exactly one) fails;
+    // that failure is then emitted in the same {"file", "error"} shape
+    // stdin uses (#46, #108).
     let mut single_arg_error: Option<String> = None;
 
     for file in &args.files {
@@ -345,14 +349,11 @@ fn run_json_mode(args: &Args, config: &FilterConfig) -> io::Result<bool> {
     }
 
     // Shape is chosen by how many arguments were given, not how many
-    // succeeded: otherwise `ewc --json good.txt bad.txt` (1 success of 2
-    // args) would return the bare single-object shape while
-    // `ewc --json bad1.txt bad2.txt` (0 successes) returns the {files,
-    // total} envelope — an unpredictable schema for a pipe consumer that
-    // can't know success counts ahead of time (#27). A single argument that
-    // failed entirely gets the same error-object shape stdin's read
-    // failure uses, rather than the multi-input envelope with an empty
-    // `files` array (#46, #108).
+    // succeeded, so a pipe consumer that can't know success counts ahead
+    // of time sees a predictable schema: one argument gives a single
+    // object, several give the {files, total} envelope (#27). A single
+    // argument that failed entirely gives the {"file", "error"} object
+    // stdin's read failure uses (#46, #108).
     if let Some(error) = single_arg_error {
         let name = args.files[0].to_string_lossy();
         writeln!(out, "{}", format_json_error(&name, &error))?;
