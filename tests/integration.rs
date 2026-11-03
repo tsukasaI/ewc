@@ -367,8 +367,8 @@ fn compact_flag_single_file() {
 
 #[test]
 fn compact_flag_directory_has_single_space_before_counts() {
-    // Pins the single space between "(N files):" and the counts at the CLI
-    // level; file headers already had one (#48).
+    // Regression test for #48: pins the single space between "(N files):"
+    // and the counts at the CLI level; file headers already had one.
     let dir = create_test_dir();
     let result = run_ewc(&["-C", dir.path().to_str().unwrap()]);
 
